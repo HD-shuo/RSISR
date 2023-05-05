@@ -13,10 +13,8 @@ from torchvision.utils import make_grid
 from torch import autocast
 from contextlib import nullcontext
 from pytorch_lightning import seed_everything
-from imwatermark import WatermarkEncoder
 
 
-from scripts.txt2img import put_watermark
 from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
 
