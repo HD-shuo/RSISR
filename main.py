@@ -18,6 +18,7 @@ from pytorch_lightning.utilities.distributed import rank_zero_only
 from pytorch_lightning.utilities import rank_zero_info
 
 from ldm.util import instantiate_from_config
+from utils import load_model_path_by_args
 
 
 def get_parser(**parser_kwargs):
@@ -50,6 +51,12 @@ def get_parser(**parser_kwargs):
         nargs="?",
         help="resume from logdir or checkpoint in logdir",
     )
+    # Restart Control
+    parser.add_argument('--load_best', action='store_true')
+    parser.add_argument('--load_dir', default=None, type=str)
+    parser.add_argument('--load_ver', default=None, type=str)
+    parser.add_argument('--load_v_num', default=None, type=int)
+    
     parser.add_argument(
         "-b",
         "--base",
@@ -300,12 +307,54 @@ class CUDACallback(Callback):
             pass
 
 def main(args):
+    now = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    opt, unknown = parser.parse_known_args()
+    if opt.name and opt.resume:
+        raise ValueError(
+            "-n/--name and -r/--resume cannot be specified both."
+            "If you want to resume training in a new log folder, "
+            "use -n/--name in combination with --resume_from_checkpoint"
+        )
+    if opt.resume:
+        if not os.path.exists(opt.resume):
+            raise ValueError("Cannot find {}".format(opt.resume))
+        if os.path.isfile(opt.resume):
+            paths = opt.resume.split("/")
+            # idx = len(paths)-paths[::-1].index("logs")+1
+            # logdir = "/".join(paths[:idx])
+            logdir = "/".join(paths[:-2])
+            ckpt = opt.resume
+        else:
+            assert os.path.isdir(opt.resume), opt.resume
+            logdir = opt.resume.rstrip("/")
+            ckpt = os.path.join(logdir, "checkpoints", "last.ckpt")
+
+        opt.resume_from_checkpoint = ckpt
+        base_configs = sorted(glob.glob(os.path.join(logdir, "configs/*.yaml")))
+        opt.base = base_configs + opt.base
+        _tmp = logdir.split("/")
+        nowname = _tmp[-1]
+    else:
+        if opt.name:
+            name = "_" + opt.name
+        elif opt.base:
+            cfg_fname = os.path.split(opt.base[0])[-1]
+            cfg_name = os.path.splitext(cfg_fname)[0]
+            name = "_" + cfg_name
+        else:
+            name = ""
+        nowname = now + name + opt.postfix
+        logdir = os.path.join(opt.logdir, nowname)
+
     ckptdir = os.path.join(logdir, "checkpoints")
+    print(ckptdir)
     cfgdir = os.path.join(logdir, "configs")
+    print(cfgdir)
     configdir = "/share/program/dxs/RSISR/configs/ptp.yaml"
     conf = OmegaConf.load(configdir)
     pl.seed_everything(args.seed)
     load_path = load_model_path_by_args(args)
+
     # data
     data = instantiate_from_config(conf.data)
     data.prepare_data()
@@ -331,27 +380,3 @@ if __name__ == "__main__":
     parser = Trainer.add_argparse_args(parser)
     args = parser.parse_args()
     main(args)
-
-
-        # allow checkpointing via USR1
-    def melk(*args, **kwargs):
-        # run all checkpoint hooks
-        if trainer.global_rank == 0:
-            print("Summoning checkpoint.")
-            ckpt_path = os.path.join(ckptdir, "last.ckpt")
-            trainer.save_checkpoint(ckpt_path)
-
-
-    def divein(*args, **kwargs):
-        if trainer.global_rank == 0:
-            import pudb;
-            pudb.set_trace()
-
-
-    import signal
-
-    signal.signal(signal.SIGUSR1, melk)
-    signal.signal(signal.SIGUSR2, divein)
-
-    # run
-    trainer.fit(model, data)

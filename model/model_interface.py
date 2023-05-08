@@ -13,7 +13,7 @@ from ldm.util import instantiate_from_config
 
 
 class MInterface(pl.LightningModule):
-    def __init__(self, model_name, loss, lr, **kargs):
+    def __init__(self, model_name, loss, lr, config, **kargs):
         super().__init__()
         self.save_hyperparameters()
         self.load_model()
@@ -87,8 +87,8 @@ class MInterface(pl.LightningModule):
         else:
             raise ValueError("Invalid Loss Type!")
 
-    def load_model(self):
-        Model = instantiate_from_config(conf.model)
+    def load_model(self, config):
+        Model = instantiate_from_config(config.model)
         self.model = self.instancialize(Model)
 
     def instancialize(self, Model, **other_args):

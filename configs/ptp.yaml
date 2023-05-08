@@ -24,9 +24,8 @@ model:
   log_every_t: 200
   timesteps: 1000
   first_stage_key: "jpg"
-  cond_stage_key: "txt"
-  image_size: 128
-  channels: 4
+  image_size: 256
+  channels: 3
   cond_stage_trainable: false
   conditioning_key: "hybrid-adm"
   monitor: val/loss_simple_ema
@@ -81,9 +80,3 @@ model:
 
       lossconfig:
         target: torch.nn.Identity
-
-  cond_stage_config:
-    target: ldm.modules.encoders.modules.FrozenOpenCLIPEmbedder
-    params:
-      freeze: True
-      layer: "penultimate"
