@@ -40,5 +40,5 @@ def load_model_path(root=None, version=None, v_num=None, best=False):
         res = str(Path(root) / 'last.ckpt')
     return res
 
-def load_model_path_by_args(args):
-    return load_model_path(root=args.load_dir, version=args.load_ver, v_num=args.load_v_num)
+def load_model_path_by_args(config):
+    return load_model_path(root=config.checkpoint_loaddir, version=config.checkpoint_version, v_num=config.load_v_num)

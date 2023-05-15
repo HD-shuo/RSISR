@@ -7,17 +7,17 @@ from torch.nn import functional as F
 import torch.optim.lr_scheduler as lrs
 
 import pytorch_lightning as pl
-from .metrics import tensor_accessment
-from .utils import quantize
-from ldm.util import instantiate_from_config
+from model.metrics import tensor_accessment
+from model.utils import quantize
 
 
 class MInterface(pl.LightningModule):
-    def __init__(self, model_name, loss, lr, config, **kargs):
+    def __init__(self, model_name, loss_function, lr, optimizer, **kargs):
         super().__init__()
         self.save_hyperparameters()
-        self.load_model()
-        self.configure_loss()
+        self.load_model(model_name)
+        self.optimizer = optimizer
+        self.lr = lr
 
         # Project-Specific Definitions
         self.hsi_index = np.r_[0, 4:12]
@@ -56,21 +56,21 @@ class MInterface(pl.LightningModule):
         # self.print(self.get_progress_bar_dict())
 
     def configure_optimizers(self):
-        if hasattr(self.hparams, 'weight_decay'):
-            weight_decay = self.hparams.weight_decay
+        if hasattr(self.optimizer, 'weight_decay'):
+            weight_decay = self.optimizer.weight_decay
         else:
             weight_decay = 0
         optimizer = torch.optim.Adam(
-            self.parameters(), lr=self.hparams.lr, weight_decay=weight_decay)
+            self.parameters(), lr=self.lr, weight_decay=weight_decay)
 
-        if self.hparams.lr_scheduler is None:
+        if self.lr_scheduler is None:
             return optimizer
         else:
-            if self.hparams.lr_scheduler == 'step':
+            if self.lr_scheduler == 'step':
                 scheduler = lrs.StepLR(optimizer,
                                        step_size=self.hparams.lr_decay_steps,
                                        gamma=self.hparams.lr_decay_rate)
-            elif self.hparams.lr_scheduler == 'cosine':
+            elif self.lr_scheduler == 'cosine':
                 scheduler = lrs.CosineAnnealingLR(optimizer,
                                                   T_max=self.hparams.lr_decay_steps,
                                                   eta_min=self.hparams.lr_decay_min_lr)
@@ -78,8 +78,7 @@ class MInterface(pl.LightningModule):
                 raise ValueError('Invalid lr_scheduler type!')
             return [optimizer], [scheduler]
 
-    def configure_loss(self):
-        loss = self.hparams.loss.lower()
+    def configure_loss(self, loss):
         if loss == 'mse':
             self.loss_function = F.mse_loss
         elif loss == 'l1':
@@ -87,8 +86,8 @@ class MInterface(pl.LightningModule):
         else:
             raise ValueError("Invalid Loss Type!")
 
-    def load_model(self, config):
-        Model = instantiate_from_config(config.model)
+    def load_model(self, model_name):
+        Model = model_name
         self.model = self.instancialize(Model)
 
     def instancialize(self, Model, **other_args):

@@ -18,66 +18,51 @@ import pytorch_lightning as pl
 from torch.utils.data import DataLoader, random_split, Dataset
 import torchvision.transforms as transforms
 
-
 class DInterface(pl.LightningDataModule):
 
-    def __init__(self, batch_size, num_workers=8,
-                 dataset='',
+    def __init__(self, params, num_workers=8,
                  **kwargs):
         super().__init__()
         self.num_workers = num_workers
-        self.dataset = dataset
         self.kwargs = kwargs
-        self.batch_size = batch_size
+        self.batch_size = params.batch_size
+        self.params = params
         # self.load_data_module()
 
     def setup(self, stage=None):
-        # Assign train/val datasets for use in dataloaders
-        if stage == 'fit' or stage is None:
-            self.trainset = self.instancialize(train=True)
-            self.valset = self.instancialize(train=False)
-
-        # Assign test dataset for use in dataloader(s)
-        if stage == 'test' or stage is None:
-            self.testset = self.instancialize(train=False)
+        self.datasets = {k: self.params[k] for k in self.params}
+        if self.params.wrap:
+            for k in self.datasets:
+                self.datasets[k] = WrappedDataset(self.datasets[k])
 
     def train_dataloader(self):
-        return DataLoader(self.trainset, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True)
+        is_iterable_dataset = isinstance(self.datasets['train'])
+        if is_iterable_dataset or self.use_worker_init_fn:
+            init_fn = worker_init_fn
+        else:
+            init_fn = None
+        return DataLoader(self.datasets["train"], batch_size=self.batch_size,
+                          num_workers=self.num_workers, shuffle=False if is_iterable_dataset else True,
+                          worker_init_fn=init_fn)
 
-    def val_dataloader(self):
-        return DataLoader(self.valset, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False)
+    def val_dataloader(self, shuffle=False):
+        if isinstance(self.datasets['validation']) or self.use_worker_init_fn:
+            init_fn = worker_init_fn
+        else:
+            init_fn = None
+        return DataLoader(self.datasets["validation"],
+                          batch_size=self.batch_size,
+                          num_workers=self.num_workers,
+                          worker_init_fn=init_fn,
+                          shuffle=shuffle)
 
-    def test_dataloader(self):
-        return DataLoader(self.testset, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False)
-
-    """
-    def load_data_module(self):
-        name = self.dataset
-        # Change the `snake_case.py` file name to `CamelCase` class name.
-        # Please always name your model file name as `snake_case.py` and
-        # class name corresponding `CamelCase`.
-        camel_name = ''.join([i.capitalize() for i in name.split('_')])
-        try:
-            self.data_module = getattr(importlib.import_module(
-                '.'+name, package=__package__), camel_name)
-        except:
-            raise ValueError(
-                f'Invalid Dataset File Name or Invalid Class Name data.{name}.{camel_name}')
-    """
-
-    def instancialize(self, **other_args):
-        """ Instancialize a model using the corresponding parameters
-            from self.hparams dictionary. You can also input any args
-            to overwrite the corresponding value in self.kwargs.
-        """
-        class_args = inspect.getargspec(self.data_module.__init__).args[1:]
-        inkeys = self.kwargs.keys()
-        args1 = {}
-        for arg in class_args:
-            if arg in inkeys:
-                args1[arg] = self.kwargs[arg]
-        args1.update(other_args)
-        return self.data_module(**args1)
+    def test_dataloader(self, shuffle=False):
+        is_iterable_dataset = isinstance(self.datasets['train'], Txt2ImgIterableBaseDataset)
+        if is_iterable_dataset or self.use_worker_init_fn:
+            init_fn = worker_init_fn
+        else:
+            init_fn = None
+        
 
 class WrappedDataset(Dataset):
     """Wraps an arbitrary object with __len__ and __getitem__ into a pytorch dataset"""

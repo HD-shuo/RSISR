@@ -3,18 +3,21 @@ data:
  params:
   batch_size: 100
   wrap: bool
- train:
-  target: /share/program/dxs/Database/data/DIV2K_train_HR
-  params:
-   key: value
- validation:
-  target: /share/program/dxs/Database/data/DIV2K_valid_HR
-  params:
-   key: value
-
+  train:
+    target: /share/program/dxs/Database/data/DIV2K_train_HR
+  validation: 
+    target: /share/program/dxs/Database/data/DIV2K_valid_HR
 model:
- base_learning_rate: 1.0e-04
+ model_name: stable_diffusion
+ lr: 1.0e-04
+ loss_function: l1
+ lr_scheduler: consine
+ checkpoint_loaddir: /share/program/dxs/RSISR/checkpoint
+ checkpoint_version: 0
+ load_v_num: 1
  target: ldm.models.diffusion.ddpm.LatentUpscaleDiffusion
+ optimizer: 
+  weight_decay: 1e-5
  params:
   parameterization: "v"
   low_scale_key: "lr"

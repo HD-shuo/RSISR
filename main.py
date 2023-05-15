@@ -14,11 +14,14 @@ from PIL import Image
 from pytorch_lightning import seed_everything
 from pytorch_lightning.trainer import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, Callback, LearningRateMonitor
+import pytorch_lightning.callbacks as plc
 from pytorch_lightning.utilities.distributed import rank_zero_only
 from pytorch_lightning.utilities import rank_zero_info
 
 from ldm.util import instantiate_from_config
 from utils import load_model_path_by_args
+from data import DInterface
+from model import MInterface
 
 
 def get_parser(**parser_kwargs):
@@ -53,10 +56,6 @@ def get_parser(**parser_kwargs):
     )
     # Restart Control
     parser.add_argument('--load_best', action='store_true')
-    parser.add_argument('--load_dir', default=None, type=str)
-    parser.add_argument('--load_ver', default=None, type=str)
-    parser.add_argument('--load_v_num', default=None, type=int)
-    
     parser.add_argument(
         "-b",
         "--base",
@@ -128,54 +127,27 @@ def get_parser(**parser_kwargs):
     )
     return parser
 
+def load_callbacks(config):
+    callbacks = []
+    callbacks.append(plc.EarlyStopping(
+        monitor='mpsnr',
+        mode='max',
+        patience=10,
+        min_delta=0.01
+    ))
 
-class SetupCallback(Callback):
-    def __init__(self, resume, now, logdir, ckptdir, cfgdir, config, lightning_config):
-        super().__init__()
-        self.resume = resume
-        self.now = now
-        self.logdir = logdir
-        self.ckptdir = ckptdir
-        self.cfgdir = cfgdir
-        self.config = config
-        self.lightning_config = lightning_config
+    callbacks.append(plc.ModelCheckpoint(
+        monitor='mpsnr',
+        filename='best-{epoch:02d}-{mpsnr:.2f}-{mssim:.3f}',
+        save_top_k=1,
+        mode='max',
+        save_last=True
+    ))
 
-    def on_keyboard_interrupt(self, trainer, pl_module):
-        if trainer.global_rank == 0:
-            print("Summoning checkpoint.")
-            ckpt_path = os.path.join(self.ckptdir, "last.ckpt")
-            trainer.save_checkpoint(ckpt_path)
-
-    def on_pretrain_routine_start(self, trainer, pl_module):
-        if trainer.global_rank == 0:
-            # Create logdirs and save configs
-            os.makedirs(self.logdir, exist_ok=True)
-            os.makedirs(self.ckptdir, exist_ok=True)
-            os.makedirs(self.cfgdir, exist_ok=True)
-
-            if "callbacks" in self.lightning_config:
-                if 'metrics_over_trainsteps_checkpoint' in self.lightning_config['callbacks']:
-                    os.makedirs(os.path.join(self.ckptdir, 'trainstep_checkpoints'), exist_ok=True)
-            print("Project config")
-            print(OmegaConf.to_yaml(self.config))
-            OmegaConf.save(self.config,
-                           os.path.join(self.cfgdir, "{}-project.yaml".format(self.now)))
-
-            print("Lightning config")
-            print(OmegaConf.to_yaml(self.lightning_config))
-            OmegaConf.save(OmegaConf.create({"lightning": self.lightning_config}),
-                           os.path.join(self.cfgdir, "{}-lightning.yaml".format(self.now)))
-
-        else:
-            # ModelCheckpoint callback created log directory --- remove it
-            if not self.resume and os.path.exists(self.logdir):
-                dst, name = os.path.split(self.logdir)
-                dst = os.path.join(dst, "child_runs", name)
-                os.makedirs(os.path.split(dst)[0], exist_ok=True)
-                try:
-                    os.rename(self.logdir, dst)
-                except FileNotFoundError:
-                    pass
+    if config.model.lr_scheduler:
+        callbacks.append(plc.LearningRateMonitor(
+            logging_interval='epoch'))
+    return callbacks
 
 
 class ImageLogger(Callback):
@@ -307,71 +279,27 @@ class CUDACallback(Callback):
             pass
 
 def main(args):
-    now = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-    opt, unknown = parser.parse_known_args()
-    if opt.name and opt.resume:
-        raise ValueError(
-            "-n/--name and -r/--resume cannot be specified both."
-            "If you want to resume training in a new log folder, "
-            "use -n/--name in combination with --resume_from_checkpoint"
-        )
-    if opt.resume:
-        if not os.path.exists(opt.resume):
-            raise ValueError("Cannot find {}".format(opt.resume))
-        if os.path.isfile(opt.resume):
-            paths = opt.resume.split("/")
-            # idx = len(paths)-paths[::-1].index("logs")+1
-            # logdir = "/".join(paths[:idx])
-            logdir = "/".join(paths[:-2])
-            ckpt = opt.resume
-        else:
-            assert os.path.isdir(opt.resume), opt.resume
-            logdir = opt.resume.rstrip("/")
-            ckpt = os.path.join(logdir, "checkpoints", "last.ckpt")
-
-        opt.resume_from_checkpoint = ckpt
-        base_configs = sorted(glob.glob(os.path.join(logdir, "configs/*.yaml")))
-        opt.base = base_configs + opt.base
-        _tmp = logdir.split("/")
-        nowname = _tmp[-1]
-    else:
-        if opt.name:
-            name = "_" + opt.name
-        elif opt.base:
-            cfg_fname = os.path.split(opt.base[0])[-1]
-            cfg_name = os.path.splitext(cfg_fname)[0]
-            name = "_" + cfg_name
-        else:
-            name = ""
-        nowname = now + name + opt.postfix
-        logdir = os.path.join(opt.logdir, nowname)
-
-    ckptdir = os.path.join(logdir, "checkpoints")
-    print(ckptdir)
-    cfgdir = os.path.join(logdir, "configs")
-    print(cfgdir)
     configdir = "/share/program/dxs/RSISR/configs/ptp.yaml"
     conf = OmegaConf.load(configdir)
     pl.seed_everything(args.seed)
-    load_path = load_model_path_by_args(args)
+    load_path = load_model_path_by_args(conf.model)
 
     # data
-    data = instantiate_from_config(conf.data)
-    data.prepare_data()
-    data.setup()
-    data_module = DInterface(**vars(args))
+    data_module = DInterface(**conf.data)
     
     # configure learning rate
-    bs, base_lr = conf.data.params.batch_size, conf.model.base_learning_rate
+    bs, base_lr = conf.data.params.batch_size, conf.model.lr
 
     # model
     if load_path is None:
-        model = MInterface(**vars(args))
+        model = MInterface(**conf.model)
     else:
-        model = MInterface(**vars(args))
-        args.ckpt_path = load_path
-
-    args.callbacks = load_callbacks()
+        model = MInterface(**conf.model)
+        conf.model.ckpt_path = load_path
+    #print("model list:")
+    #print(list(model.parameters()))
+    args.callbacks = load_callbacks(conf)
+    #print(args)
     trainer = Trainer.from_argparse_args(args)
     trainer.fit(model, data_module)
 
