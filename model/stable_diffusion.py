@@ -38,7 +38,14 @@ def nonlinearity(x):
 def Normalize(in_channels, num_groups=32):
     return torch.nn.GroupNorm(num_groups=num_groups, num_channels=in_channels, eps=1e-6, affine=True)
 
-
+"""
+上采样模块,将输入张量的空间维度扩大两倍
+params:
+in_channels:输入张量的通道数
+with_conv:是否使用卷积层进行后续处理。若为 True,则会创建一个卷积层对象;否则不会创建
+forward:
+使用interpolate函数对输入张量进行上采样,该函数可以指定缩放因子并支持多种插值,也可与其他pytorch模块结合使用
+"""
 class Upsample(nn.Module):
     def __init__(self, in_channels, with_conv):
         super().__init__()
@@ -56,7 +63,19 @@ class Upsample(nn.Module):
             x = self.conv(x)
         return x
 
-
+"""
+2倍下采样模块,可选使用卷积或平均池化执行下采样
+params:
+in_channels:输入张量的通道数
+with_conv:是否使用卷积层进行后续处理。若为 True,则会创建一个卷积层对象;否则不会
+forward:
+不使用卷积:使用torch.nn.functional.avg_pool2d函数按照2x2的窗口进行平均池化,从而将分辨率减小一半
+使用卷积:使用torch.nn.functional.pad进行下采样,防止边缘像素丢失先进行了填充
+这里使用了一种称为“asymmetric padding”的方法,通过在特征图的上、下、左、右四个方向上添加不同数量的填充像素来实现。
+具体而言,在上下方向上添加1个填充像素,在左右方向上不添加填充像素。
+这样，卷积操作将会在特征图的中心区域进行,而边缘区域的像素将被保留下来。
+由于卷积核的步幅为2,因此特征图的分辨率将减小一半。因此,这种情况下,该函数也执行2倍下采样。
+"""
 class Downsample(nn.Module):
     def __init__(self, in_channels, with_conv):
         super().__init__()
@@ -78,7 +97,22 @@ class Downsample(nn.Module):
             x = torch.nn.functional.avg_pool2d(x, kernel_size=2, stride=2)
         return x
 
-
+"""
+实现ResNet
+params:
+in_channels:输入通道
+out_channels:输出通道
+conv_shortcut:是否使用卷积捷径
+dropout:dropout比例
+temb_channels:temb通道数
+forward:
+1、对输入进行归一化和非线性变换(self.norm1(h)、h = nonlinearity(h))
+2、应用3x3的卷积操作,并在需要时将temb(如果存在)添加到输出中
+3、输出再次进行归一化、非线性变换和dropout操作
+4、再次应用3x3的卷积操作。
+5、如果输入通道数和输出通道数不相等,则使用卷积捷径或1x1卷积(也称为NIN)来调整维度。
+最终输出是输入和卷积块输出的和。
+"""
 class ResnetBlock(nn.Module):
     def __init__(self, *, in_channels, out_channels=None, conv_shortcut=False,
                  dropout, temb_channels=512):
@@ -140,13 +174,32 @@ class ResnetBlock(nn.Module):
 
         return x+h
 
-
+"""
+实现线性注意力机制->计算输入序列中每个元素的权重,在这个模块中，输入张量的每个通道都会被视为一个序列，然后对每个通道应用线性注意力机制。
+该模块是 LinearAttention 类的子类，它重载了 __init__ 方法，以便与 AttnBlock 类的使用方式匹配。
+input tensor:
+(batch_size, in_channels, height, width)
+其中 in_channels 是输入张量的通道数,height 和 width 是输入张量的高度和宽度。
+在前向传递中，该模块首先将输入张量重塑为 (batch_size * height * width, in_channels) 的形状，
+然后将其输入到 LinearAttention 类中。这个类会计算输入序列中每个元素的权重，并将它们乘以相应的元素，得到加权平均值。
+最后，这个模块将加权平均值重塑为 (batch_size, in_channels, height, width) 的形状，并返回它作为输出。
+该模块构造函数接受参数in_channels指定了输入张量的通道数,heads与dim_heads都设为1,本质是计算了一个加权平均
+"""
 class LinAttnBlock(LinearAttention):
     """to match AttnBlock usage"""
     def __init__(self, in_channels):
         super().__init__(dim=in_channels, heads=1, dim_head=in_channels)
 
-
+"""
+实现注意力机制
+使用给定的输入通道数初始化注意力块。它定义了几个卷积层(self.q,self.k,self.v和self.proj_out),用于计算注意力权重并转换输入特征图。
+forward:
+接受一个输入张量x并对其应用注意力机制。
+1、输入张量进行归一化
+2、使用卷积层计算查询、键和值张量。
+3、计算注意力权重并将其应用于值张量以获得关注的特征图。
+4、它对关注特征图应用投影层,并将其添加到原始输入张量中以获得输出。
+"""
 class AttnBlock(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
@@ -201,7 +254,11 @@ class AttnBlock(nn.Module):
 
         return x+h_
 
-
+"""
+根据指定的attn_type返回AttnBlock类的实例或标识模块。
+如果attn_type为“vanilla”,则返回具有给定输入通道数的AttnBlock实例。
+如果attn_type为“none”,则返回一个标识模块,该模块仅返回其输入。
+"""
 def make_attn(in_channels, attn_type="vanilla"):
     assert attn_type in ["vanilla", "linear", "none"], f'attn_type {attn_type} unknown'
     print(f"making attention of type '{attn_type}' with {in_channels} in_channels")
@@ -213,6 +270,39 @@ def make_attn(in_channels, attn_type="vanilla"):
         return LinAttnBlock(in_channels)
 
 
+"""
+使用一个多层的残差网络对低分辨率图像进行特征提取与增强,并通过上采样转换为高分图像
+
+input:四维张量,表示一个批次的图像
+
+params:
+ch:int,模型第一层卷积层的输出通道数
+out_ch:int,最终输出通道数(高分图像通道数)
+ch_mult:tuple,表示每一层的通道数相对于第一层的倍数，用于控制模型的通道数变化。默认值为(1, 2, 4, 8)
+num_res_blocks:int,残差块的数量
+attn_resolutions:list,应用注意力机制的分辨率列表
+dropout:float,表示残差块中的dropout概率。默认值为0.0。
+resamp_with_conv:bool,表示是否使用卷积层进行上采样和下采样。默认值为True
+in_channels:int,表示输入图像的通道数。
+resolution:int,表示输入图像的分辨率。
+use_timestep:bool,表示是否使用时间步嵌入模块。默认值为True。
+use_linear_attn:bool,表示是否使用线性注意力机制。默认值为False。
+attn_type:str,表示注意力机制的类型,可以是"vanilla"或"linear"。默认值为"vanilla"。
+
+构造函数:
+定义了多个子模块，包括卷积层(Conv2d)、残差块(ResnetBlock)、下采样模块(Downsample)、中间模块、上采样模块(Upsample)、自注意力模块(make_attn)和卷积层。
+这些子模块在forward()方法中被调用，以实现对输入图像的特征提取和尺寸变换。
+中间模块:在上下采样之间对特征进一步处理
+mid.block_1:残差块,增加模型深度同时避免梯度消失
+mid.attn_1:自注意力模块,学习输入图像中不同位置之间的依赖关系
+mid.block_2:残差块,增加模型深度同时避免梯度消失
+forward:
+1、输入首先通过一个卷积层进行特征提取
+2、通过一系列残差块进行特征增强
+3、输入通过多个下采样模块进行尺寸缩小
+4、然后通过一个中间模块进行特征加权。
+5、输入通过多个上采样模块进行尺寸恢复,最终通过一个卷积层输出高分辨率图像。
+"""
 class Model(nn.Module):
     def __init__(self, *, ch, out_ch, ch_mult=(1,2,4,8), num_res_blocks,
                  attn_resolutions, dropout=0.0, resamp_with_conv=True, in_channels,
@@ -652,6 +742,24 @@ class UpsampleDecoder(nn.Module):
         return h
 
 
+"""
+将输入图像的大小缩小了一个固定的因子，然后再将其恢复到原始大小
+params:
+factor:缩小因子
+in_channels:输入图像的通道数
+mid_channels:中间通道数
+out_channels:输出图像的通道数
+depth:残差块的深度
+构造函数：
+卷积层、残差块、插值层、注意力机制和卷积层
+input:四维张量,表示一个批次的图像
+forward:
+1、输入首先通过一个卷积层进行特征提取
+2、通过一系列残差块进行特征增强
+3、输入通过一个插值层进行尺寸缩小
+4、通过一个注意力机制进行特征加权
+5、输入再次通过一系列残差块进行特征增强,最终通过一个卷积层输出。
+"""
 class LatentRescaler(nn.Module):
     def __init__(self, factor, in_channels, mid_channels, out_channels, depth=2):
         super().__init__()
@@ -725,6 +833,17 @@ class MergedRescaleDecoder(nn.Module):
         return x
 
 
+"""
+对输入数据进行上采样
+params:
+in_size:输入数据的分辨率
+out_size:输出数据的分辨率
+in_channels:输入数据的通道数
+out_channels:输出数据的通道数
+ch_mult:一个整数或整数列表,表示每个ResNet块中通道数的倍数
+整数:则表示所有ResNet块中通道数的倍数相同
+列表:则表示每个ResNet块中通道数的倍数可以不同。
+"""
 class Upsampler(nn.Module):
     def __init__(self, in_size, out_size, in_channels, out_channels, ch_mult=2):
         super().__init__()
@@ -744,6 +863,17 @@ class Upsampler(nn.Module):
         return x
 
 
+"""
+对输入数据进行大小调整
+params:
+in_channels:输入数据的通道数
+learned:bool,是否使用学习到的下采样方法。如果为True,则会忽略mode参数
+mode:一个字符串，表示调整大小时使用的方法。默认为"bilinear"。其他可选值包括"nearest"和"bicubic"等
+使用interpolate函数对输入数据进行大小调整
+根据scale_factor参数对输入数据进行缩放,
+同时可以选择不同的调整大小方法(如双线性插值、最近邻插值等)。
+如果scale_factor参数为1.0,则直接返回原始输入数据。
+"""
 class Resize(nn.Module):
     def __init__(self, in_channels=None, learned=False, mode="bilinear"):
         super().__init__()
@@ -767,6 +897,19 @@ class Resize(nn.Module):
             x = torch.nn.functional.interpolate(x, mode=self.mode, align_corners=False, scale_factor=scale_factor)
         return x
 
+"""
+params:
+ch_mult:一个整数列表,表示每个resnet块中通道数的倍数
+in_channels:输入数据的通道数
+pretrained_model:预训练模型
+reshape:bool,表示是否需要对输出结果进行reshape
+n_channels:输出数据通道数,默认为none
+dropout:在resnet块中使用的dropout率,默认为0
+pretrained_config:预训练模型的配置信息
+由多个ResNet块和下采样层组成的神经网络模型。
+它通过调用pretrained_model提取输入数据的特征,并将其传递给第一个ResNet块进行处理。
+通过多个ResNet块和下采样层对特征进行进一步处理,最终得到输出结果。
+"""
 class FirstStagePostProcessor(nn.Module):
 
     def __init__(self, ch_mult:list, in_channels,

@@ -15,7 +15,7 @@ print(bs, base_lr)
 print(data.dataset)
 print(data.batch_size)
 """
-
+"""
 import argparse
 from pytorch_lightning import Trainer
 
@@ -45,3 +45,25 @@ parser = get_parser()
 opt, unknown = parser.parse_known_args()
 print(opt)
 print(unknown)
+"""
+import inspect
+
+import inspect
+
+def get_class_params(filename, class_name):
+    module = __import__(filename[:-3])
+    class_obj = getattr(module, class_name)
+    init_sig = inspect.signature(class_obj.__init__)
+    class_params = {}
+    for param in init_sig.parameters.values():
+        if param.default != inspect.Parameter.empty:
+            class_params[param.name] = param.default
+        else:
+            class_params[param.name] = None
+    return class_params
+
+file = "resnet_restore.py"
+print(type(file[:-3]))
+name = "Model"
+params = get_class_params(file, name)
+print(params)

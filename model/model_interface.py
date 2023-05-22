@@ -12,12 +12,12 @@ from model.utils import quantize
 
 
 class MInterface(pl.LightningModule):
-    def __init__(self, model_name, loss_function, lr, optimizer, **kargs):
+    def __init__(self, model_name, loss, lr, **kargs):
         super().__init__()
         self.save_hyperparameters()
-        self.load_model(model_name)
-        self.optimizer = optimizer
-        self.lr = lr
+        self.load_model()
+        self.configure_loss()
+        #self.configure_optimizers()
 
         # Project-Specific Definitions
         self.hsi_index = np.r_[0, 4:12]
@@ -56,29 +56,42 @@ class MInterface(pl.LightningModule):
         # self.print(self.get_progress_bar_dict())
 
     def configure_optimizers(self):
-        if hasattr(self.optimizer, 'weight_decay'):
-            weight_decay = self.optimizer.weight_decay
+        if hasattr(self.hparams, 'weight_decay'):
+            weight_decay = self.hparams.weight_decay
         else:
             weight_decay = 0
         optimizer = torch.optim.Adam(
-            self.parameters(), lr=self.lr, weight_decay=weight_decay)
+            self.parameters(), lr=self.hparams.lr, weight_decay=weight_decay)
 
-        if self.lr_scheduler is None:
+        if self.hparams.lr_scheduler is None:
             return optimizer
         else:
-            if self.lr_scheduler == 'step':
+            if self.hparams.lr_scheduler == 'step':
+                print('Creating StepLR scheduler')
+                print('Step size:', self.hparams.lr_decay_steps)
+                print('Gamma:', self.hparams.lr_decay_rate)
                 scheduler = lrs.StepLR(optimizer,
                                        step_size=self.hparams.lr_decay_steps,
                                        gamma=self.hparams.lr_decay_rate)
-            elif self.lr_scheduler == 'cosine':
+            elif self.hparams.lr_scheduler == 'cosine':
                 scheduler = lrs.CosineAnnealingLR(optimizer,
                                                   T_max=self.hparams.lr_decay_steps,
                                                   eta_min=self.hparams.lr_decay_min_lr)
             else:
                 raise ValueError('Invalid lr_scheduler type!')
-            return [optimizer], [scheduler]
+            #return [optimizer], [scheduler]
+            return {
+            'optimizer': optimizer,
+            'lr_scheduler': {
+                'scheduler': scheduler,
+                'monitor': 'metric_to_monitor',
+                'interval': 'epoch',
+                'frequency': 1
+            }
+        }
 
-    def configure_loss(self, loss):
+    def configure_loss(self):
+        loss = self.hparams.loss.lower()
         if loss == 'mse':
             self.loss_function = F.mse_loss
         elif loss == 'l1':
@@ -86,16 +99,30 @@ class MInterface(pl.LightningModule):
         else:
             raise ValueError("Invalid Loss Type!")
 
-    def load_model(self, model_name):
-        Model = model_name
+    def load_model(self):
+        name = self.hparams.model_name
+        # Change the `snake_case.py` file name to `CamelCase` class name.
+        # Please always name your model file name as `snake_case.py` and
+        # class name corresponding `CamelCase`.
+        camel_name = ''.join([i.capitalize() for i in name.split('_')])
+        try:
+            Model = getattr(importlib.import_module(
+                '.'+name, package=__package__), camel_name)
+        except:
+            raise ValueError(
+                f'Invalid Module File Name or Invalid Class Name {name}.{camel_name}!')
+        print(type(Model))
         self.model = self.instancialize(Model)
 
-    def instancialize(self, Model, **other_args):
-        """ Instancialize a model using the corresponding parameters
-            from self.hparams dictionary. You can also input any args
-            to overwrite the corresponding value in self.hparams.
-        """
-        class_args = inspect.getargspec(Model.__init__).args[1:]
+    def instancialize(self, Model, class_name="Model", **other_args):
+        init_sig = inspect.signature(Model.__init__)
+        class_params = {}
+        for param in init_sig.parameters.values():
+            if param.default != inspect.Parameter.empty:
+                class_params[param.name] = param.default
+            else:
+                class_params[param.name] = None
+        class_args = list(class_params.keys())
         inkeys = self.hparams.keys()
         args1 = {}
         for arg in class_args:
