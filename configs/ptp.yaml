@@ -1,14 +1,16 @@
 data:
  target: data.data_interface.DInterface
  params:
-  batch_size: 100
+  train_dataset_dir: /share/program/dxs/Database/data/pngimage_train_HR
+  val_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
+  test_dataset_dir: none
+  crop_size: 64
+  upscale_factor: 2
+  batch_size: 50
   wrap: bool
-  train:
-    target: /share/program/dxs/Database/data/DIV2K_train_HR
-  validation: 
-    target: /share/program/dxs/Database/data/DIV2K_valid_HR
 model:
  model_name: resnet_restore
+ color_range: 255
  lr: 1.0e-04
  loss: l1
  weight_decay: 1e-5
@@ -19,20 +21,20 @@ model:
  checkpoint_loaddir: /share/program/dxs/RSISR/checkpoint
  checkpoint_version: 0
  load_v_num: 1
- ch: 256
- out_ch: 1024
- in_channels: 4
+ ch: 32
+ out_ch: 256
+ in_channels: 3
  num_res_blocks: 10
- attn_resolutions: [256, 512]
+ attn_resolutions: [64, 128]
  resamp_with_conv: True
- resolution: 256
- use_timestep: True
+ resolution: 64
  use_linear_attn: False
+ use_timestep: False
  attn_type: 'vanilla'
 trainer:
  max_epochs: 1000
  gpus: 4
- precision: 32
+ precision: 16
  accelerator: "ddp_spawn"
 callbacks:
  lr_scheduler: step

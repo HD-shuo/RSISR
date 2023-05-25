@@ -1,22 +1,9 @@
-# Copyright 2021 Zhongyang Zhang
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import inspect
 import importlib
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader, random_split, Dataset
 import torchvision.transforms as transforms
+from .data_utils import TrainDatasetFromFolder, ValDatasetFromFolder, TestDatasetFromFolder
 
 class DInterface(pl.LightningDataModule):
 
@@ -30,48 +17,53 @@ class DInterface(pl.LightningDataModule):
         # self.load_data_module()
 
     def setup(self, stage=None):
-        self.datasets = {k: self.params[k] for k in self.params}
-        if self.params.wrap:
-            for k in self.datasets:
-                self.datasets[k] = WrappedDataset(self.datasets[k])
+        train_dataset = TrainDatasetFromFolder(
+            dataset_dir=self.params.train_dataset_dir,
+            crop_size=self.params.crop_size,
+            upscale_factor=self.params.upscale_factor
+        )
+        val_dataset = ValDatasetFromFolder(
+            dataset_dir=self.params.val_dataset_dir,
+            crop_size=self.params.crop_size,
+            upscale_factor=self.params.upscale_factor
+        )
+        """
+        test_dataset = TestDatasetFromFolder(
+            dataset_dir=self.params.test_dataset_dir,
+            upscale_factor=self.params.upscale_factor
+        )
+        """
+
+        self.datasets = {
+            "train": train_dataset,
+            "validation": val_dataset,
+            #"test": test_dataset
+        }
 
     def train_dataloader(self):
-        is_iterable_dataset = isinstance(self.datasets['train'])
-        if is_iterable_dataset or self.use_worker_init_fn:
-            init_fn = worker_init_fn
-        else:
-            init_fn = None
-        return DataLoader(self.datasets["train"], batch_size=self.batch_size,
-                          num_workers=self.num_workers, shuffle=False if is_iterable_dataset else True,
-                          worker_init_fn=init_fn)
+        train_dataset = self.datasets["train"]
+        return DataLoader(
+            train_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=True
+        )
+
 
     def val_dataloader(self, shuffle=False):
-        if isinstance(self.datasets['validation']) or self.use_worker_init_fn:
-            init_fn = worker_init_fn
-        else:
-            init_fn = None
-        return DataLoader(self.datasets["validation"],
-                          batch_size=self.batch_size,
-                          num_workers=self.num_workers,
-                          worker_init_fn=init_fn,
-                          shuffle=shuffle)
+        val_dataset = self.datasets["validation"]
+        return DataLoader(
+            val_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=shuffle
+        )
 
     def test_dataloader(self, shuffle=False):
-        is_iterable_dataset = isinstance(self.datasets['train'], Txt2ImgIterableBaseDataset)
-        if is_iterable_dataset or self.use_worker_init_fn:
-            init_fn = worker_init_fn
-        else:
-            init_fn = None
-        
-
-class WrappedDataset(Dataset):
-    """Wraps an arbitrary object with __len__ and __getitem__ into a pytorch dataset"""
-
-    def __init__(self, dataset):
-        self.data = dataset
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        return self.data[idx]
+        test_dataset = self.datasets["test"]
+        return DataLoader(
+            test_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=shuffle
+        )

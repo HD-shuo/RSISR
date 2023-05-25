@@ -20,29 +20,26 @@ class MInterface(pl.LightningModule):
         #self.configure_optimizers()
 
         # Project-Specific Definitions
-        self.hsi_index = np.r_[0, 4:12]
-        self.rgb_index = (3, 2, 1)
 
-    def forward(self, lr_hsi, hr_rgb):
-        return self.model(lr_hsi, hr_rgb)
+    def forward(self, lr, hr):
+        return self.model(lr, hr)
 
     def training_step(self, batch, batch_idx):
         lr, hr, _ = batch
-        sr = self(lr, hr[:, self.rgb_index, ])
-        loss = self.loss_function(sr[:, self.hsi_index], hr[:, self.hsi_index])
+        sr_rgb = self(lr, hr)  # 使用模型进行高分辨率重建得到 RGB 图像
+        loss = self.loss_function(sr_rgb, hr)  # 计算损失函数
         self.log('loss', loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         lr, hr, _ = batch
-        sr = self(lr, hr[:, self.rgb_index, ])
-        sr = quantize(sr, self.hparams.color_range)
+        sr_rgb = self(lr, hr)  # 使用模型进行高分辨率重建得到 RGB 图像
+        sr_rgb = quantize(sr_rgb, self.hparams.color_range)  # 对重建的图像进行量化处理（可选）
         mpsnr, mssim, _, _ = tensor_accessment(
-            x_pred=sr[:, self.hsi_index].cpu().numpy(),
-            x_true=hr[:, self.hsi_index].cpu().numpy(),
+            x_pred=sr_rgb.cpu().numpy(),
+            x_true=hr.cpu().numpy(),
             data_range=self.hparams.color_range,
             multi_dimension=False)
-
         self.log('mpsnr', mpsnr, on_step=False, on_epoch=True, prog_bar=True)
         self.log('mssim', mssim, on_step=False, on_epoch=True, prog_bar=True)
 
