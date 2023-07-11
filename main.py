@@ -37,24 +37,6 @@ def get_parser(**parser_kwargs):
             raise argparse.ArgumentTypeError("Boolean value expected.")
 
     parser = argparse.ArgumentParser(**parser_kwargs)
-    parser.add_argument(
-        "-n",
-        "--name",
-        type=str,
-        const=True,
-        default="",
-        nargs="?",
-        help="postfix for logdir",
-    )
-    parser.add_argument(
-        "-r",
-        "--resume",
-        type=str,
-        const=True,
-        default="",
-        nargs="?",
-        help="resume from logdir or checkpoint in logdir",
-    )
     # Restart Control
     parser.add_argument('--load_best', action='store_true')
     parser.add_argument(
@@ -142,7 +124,8 @@ def load_callbacks(conf):
         filename='best-{epoch:02d}-{mpsnr:.2f}-{mssim:.3f}',
         save_top_k=1,
         mode='max',
-        save_last=True
+        save_last=True,
+        dirpath='/share/program/dxs/RSISR/checkpoint'
     ))
 
     if conf.model.lr_scheduler:
@@ -168,11 +151,10 @@ def main(args):
         conf.model.ckpt_path = load_path
     #print("model list:")
     #print(list(model.parameters()))
-    args.callbacks = load_callbacks(conf)
-    trainer = Trainer(**conf.trainer)
-    #trainer = Trainer.from_config()
-    #trainer_config = AttributeDict(trainer.__dict__)
-    #print(trainer_config)
+    #args.callbacks = load_callbacks(conf)
+    # 创建回调函数实例
+    callbacks = load_callbacks(conf)
+    trainer = Trainer(callbacks=callbacks, **conf.trainer)
     trainer.fit(model, data_module)
 
 if __name__ == "__main__":

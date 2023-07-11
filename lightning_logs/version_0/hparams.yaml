@@ -1,6 +1,7 @@
-model_name: resnet_restore
+model_name: aediff_restore
 loss: l1
 lr: 0.0001
+color_range: 255
 weight_decay: 1.0e-05
 lr_scheduler: step
 lr_decay_steps: 20
@@ -9,15 +10,17 @@ lr_decay_min_lr: 1.0e-05
 checkpoint_loaddir: /share/program/dxs/RSISR/checkpoint
 checkpoint_version: 0
 load_v_num: 1
-ch: 256
-out_ch: 1024
-in_channels: 4
+ch: 32
+out_ch: 256
+in_channels: 3
+out_channels: 3
+z_channels: 256
 num_res_blocks: 10
 attn_resolutions:
-- 256
-- 512
+- 64
+- 128
 resamp_with_conv: true
-resolution: 256
-use_timestep: true
+resolution: 64
 use_linear_attn: false
+use_timestep: false
 attn_type: vanilla

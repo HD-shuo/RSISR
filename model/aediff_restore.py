@@ -17,6 +17,9 @@ def nonlinearity(x):
 def Normalize(in_channels, num_groups=32):
     return torch.nn.GroupNorm(num_groups=num_groups, num_channels=in_channels, eps=1e-6, affine=True)
 
+def Resize(x):
+    conv_resize = torch.nn.Conv2d
+
 
 class Upsample(nn.Module):
     def __init__(self, in_channels, with_conv):
@@ -296,18 +299,11 @@ class DDPM(nn.Module):
         if context is not None:
             # assume aligned context, cat along channel axis
             x = torch.cat((x, context), dim=1)
-        if self.use_timestep:
-            # timestep embedding
-            assert t is not None
-            temb = get_timestep_embedding(t, self.ch)
-            temb = self.temb.dense[0](temb)
-            temb = nonlinearity(temb)
-            temb = self.temb.dense[1](temb)
-        else:
             temb = None
 
         # downsampling
         hs = [self.conv_in(x)]
+        temb = None
         for i_level in range(self.num_resolutions):
             for i_block in range(self.num_res_blocks):
                 h = self.down[i_level].block[i_block](hs[-1], temb)
@@ -652,25 +648,45 @@ class MergedRescaleEncoder(nn.Module):
         return x
 
 class MergedRescaleDecoder(nn.Module):
+    #z_channels是噪声信道
     def __init__(self, z_channels, out_ch, resolution, num_res_blocks, attn_resolutions, ch, ch_mult=(1,2,4,8),
                  dropout=0.0, resamp_with_conv=True, rescale_factor=1.0, rescale_module_depth=1):
         super().__init__()
         tmp_chn = z_channels*ch_mult[-1]
-        self.decoder = UpsampleDecoder(out_ch=out_ch, z_channels=tmp_chn, attn_resolutions=attn_resolutions, dropout=dropout,
+        self.decoder = Decoder(out_ch=out_ch, z_channels=tmp_chn, attn_resolutions=attn_resolutions, dropout=dropout,
                                resamp_with_conv=resamp_with_conv, in_channels=None, num_res_blocks=num_res_blocks,
                                ch_mult=ch_mult, resolution=resolution, ch=ch)
         self.rescaler = LatentRescaler(factor=rescale_factor, in_channels=z_channels, mid_channels=tmp_chn,
                                        out_channels=tmp_chn, depth=rescale_module_depth)
+        self.resize = nn.Conv2d(in_channels=z_channels,
+                                 out_channels=3,
+                                 kernel_size=1,
+                                 stride=1)
 
     def forward(self, x):
         x = self.rescaler(x)
         x = self.decoder(x)
+        #print("decoder output size: ", x.size())
+        x = self.resize(x)
         return x
 
 class AediffRestore(nn.Module):
-    def __init__(self, z_channels, out_ch, resolution, num_res_blocks, attn_resolutions, ch, ch_mult=(1,2,4,8),
+    def __init__(self,in_channels, out_channels, z_channels, out_ch, resolution, num_res_blocks, attn_resolutions, ch, ch_mult=(1,2,4,8),
                  dropout=0.0, resamp_with_conv=True, rescale_factor=1.0, rescale_module_depth=1):
         super().__init__()
-        self.mergedrescaleencoder = MergedRescaleEncoder() 
-        self.ddpm = DDPM()
-        self.mergedrescaledecoder = MergedRescaleDecoder()
+        self.mergedrescaleencoder = MergedRescaleEncoder(in_channels= in_channels, ch = ch, resolution=resolution, out_ch=out_ch, num_res_blocks=num_res_blocks,
+                 attn_resolutions=attn_resolutions, dropout=0.0, resamp_with_conv=True,
+                 ch_mult=ch_mult, rescale_factor=1.0, rescale_module_depth=1) 
+        self.ddpm = DDPM(ch=ch, out_ch=out_ch, ch_mult=(1,2,4,8), num_res_blocks=num_res_blocks,resolution=resolution,
+                 attn_resolutions=attn_resolutions, dropout=0.0, resamp_with_conv=True, in_channels=256,)
+        self.mergedrescaledecoder = MergedRescaleDecoder(z_channels, out_ch, resolution=resolution, num_res_blocks=num_res_blocks, attn_resolutions=attn_resolutions, ch=ch, ch_mult=(1,2,4,8),
+                 dropout=0.0, resamp_with_conv=True, rescale_factor=1.0, rescale_module_depth=1)
+        self.upsample = Upsample(in_channels=out_channels, with_conv=resamp_with_conv)
+
+    def forward(self,x):
+        x = self.mergedrescaleencoder(x)
+        x = self.ddpm(x)
+        x = self.mergedrescaledecoder(x)
+        x = self.upsample(x)
+        x = self.upsample(x)
+        return x

@@ -9,7 +9,7 @@ data:
   batch_size: 5
   wrap: bool
 model:
- model_name: aediff_restore
+ model_name: consistency
  color_range: 255
  lr: 1.0e-04
  loss: l1
@@ -21,18 +21,22 @@ model:
  checkpoint_loaddir: /share/program/dxs/RSISR/checkpoint
  checkpoint_version: 0
  load_v_num: 1
- ch: 32
- out_ch: 256
+ image_size: 256
  in_channels: 3
+ model_channels: 128
  out_channels: 3
- z_channels: 256
- num_res_blocks: 10
- attn_resolutions: [64, 128]
- resamp_with_conv: True
- resolution: 64
- use_linear_attn: False
- use_timestep: False
- attn_type: 'vanilla'
+ num_res_blocks: 2
+ attention_ds: [8,16,32]
+ dropout: 0.0
+ channel_mult: (1, 1, 2, 2, 4, 4)
+ use_checkpoint: False
+ use_fp16: False
+ num_heads: 4
+ num_head_channels: -1
+ num_heads_upsample: -1
+ use_scale_shift_norm: True
+ resblock_updown: False
+ use_new_attention_order: False
 trainer:
  max_epochs: 500
  gpus: 3

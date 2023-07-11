@@ -1,69 +1,71 @@
-from ldm.util import instantiate_from_config
-from omegaconf import OmegaConf
-import yaml
-"""
-config_path = "/share/program/dxs/RSISR/configs/ptp.yaml"
+import torch
+import pytorch_lightning as pl
 
-with open(config_path, 'r') as f:
-    config = yaml.safe_load(f)
-data = instantiate_from_config(config['data'])
+# 导入你的模型类
+from your_model import YourModel
 
-conf = OmegaConf.load(config_path)
-data = instantiate_from_config(conf.data)
-bs, base_lr = conf.data.params.batch_size, conf.model.base_learning_rate
-print(bs, base_lr)
-print(data.dataset)
-print(data.batch_size)
-"""
-"""
-import argparse
-from pytorch_lightning import Trainer
+class LightningTestModule(pl.LightningModule):
+    def __init__(self):
+        super().__init__()
+        
+        # 创建你的模型实例并加载预训练的权重
+        self.model = YourModel(...)
+        self.model.load_state_dict(torch.load('path_to_pretrained_weights.pth'))
 
-def get_parser(**parser_kwargs):
-    parser = argparse.ArgumentParser(**parser_kwargs)
-    parser.add_argument(
-            "-n",
-            "--name",
-            type=str,
-            const=True,
-            default="",
-            nargs="?",
-            help="postfix for logdir",
-        )
-    parser.add_argument(
-            "-r",
-            "--resume",
-            type=str,
-            const=True,
-            default="",
-            nargs="?",
-            help="resume from logdir or checkpoint in logdir",
-        )
-    return parser
+    def forward(self, x):
+        # 定义前向传播逻辑
+        return self.model(x)
 
-parser = get_parser()
-opt, unknown = parser.parse_known_args()
-print(opt)
-print(unknown)
-"""
-import inspect
+    def test_step(self, batch, batch_idx):
+        # 定义测试步骤逻辑
+        x, y = batch
+        y_pred = self(x)
+        loss = ...  # 计算测试损失
+        self.log('test_loss', loss)
+        return loss
 
-import inspect
+    def test_epoch_end(self, outputs):
+        # 定义测试epoch结束时的操作
+        avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
+        self.log('avg_test_loss', avg_loss)
 
-def get_class_params(filename, class_name):
-    module = __import__(filename[:-3])
-    class_obj = getattr(module, class_name)
-    init_sig = inspect.signature(class_obj.__init__)
-    class_params = {}
-    for param in init_sig.parameters.values():
-        if param.default != inspect.Parameter.empty:
-            class_params[param.name] = param.default
-        else:
-            class_params[param.name] = None
-    return class_params
+# 创建测试数据集或数据加载器
+test_dataset = YourTestDataset(...)
+test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=32)
 
-file = "resnet_restore.py"
-print(type(file[:-3]))
-name = "Model"
-params = get_class_params(file, name)
-print(params)
+# 创建 Lightning 模块
+model = LightningTestModule()
+
+# 创建 Lightning Trainer
+trainer = pl.Trainer()
+
+# 进行测试
+trainer.test(model, test_dataloaders=test_dataloader)
+
+def main(args):
+    configdir = "/share/program/dxs/RSISR/configs/ptp.yaml"
+    conf = OmegaConf.load(configdir)
+    pl.seed_everything(args.seed)
+    load_path = load_model_path_by_args(conf.model)
+
+    # data
+    data_module = DInterface(**conf.data)
+    
+    # model
+    if load_path is None:
+        model = MInterface(**conf.model)
+    else:
+        model = MInterface(**conf.model)
+        conf.model.ckpt_path = load_path
+    #print("model list:")
+    #print(list(model.parameters()))
+    #args.callbacks = load_callbacks(conf)
+    # 创建回调函数实例
+    callbacks = load_callbacks(conf)
+    trainer = Trainer(callbacks=callbacks, **conf.trainer)
+    trainer.fit(model, data_module)
+
+if __name__ == "__main__":
+    parser = get_parser()
+    args = parser.parse_args()
+    main(args)

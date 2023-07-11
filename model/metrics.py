@@ -1,80 +1,9 @@
 import numpy as np
 from scipy.signal import convolve2d
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
-
-
-def compare_ergas(x_true, x_pred, ratio):
-    """
-    Calculate ERGAS, ERGAS offers a global indication of the quality of fused image.The ideal value is 0.
-    :param x_true:
-    :param x_pred:
-    :param ratio: Upsampling scale.
-    :return:
-    """
-    x_true, x_pred = img_2d_mat(x_true=x_true, x_pred=x_pred)
-    sum_ergas = 0
-    for i in range(x_true.shape[0]):
-        vec_x = x_true[i]
-        vec_y = x_pred[i]
-        err = vec_x - vec_y
-        r_mse = np.mean(np.power(err, 2))
-        tmp = r_mse / (np.mean(vec_x)**2)
-        sum_ergas += tmp
-    return (100 / ratio) * np.sqrt(sum_ergas / x_true.shape[0])
-
-
-def compare_sam(x_true, x_pred):
-    """
-    :param x_true: HSI image：(H, W, C)
-    :param x_pred: HSI image：(H, W, C)
-    :return: 计算原始高光谱数据与重构高光谱数据的光谱角相似度
-    """
-    num = 0
-    sum_sam = 0
-    x_true, x_pred = x_true.astype(np.float32), x_pred.astype(np.float32)
-    for x in range(x_true.shape[0]):
-        for y in range(x_true.shape[1]):
-            tmp_pred = x_pred[x, y].ravel()
-            tmp_true = x_true[x, y].ravel()
-            if np.linalg.norm(tmp_true) != 0 and np.linalg.norm(tmp_pred) != 0:
-                sum_sam += np.arccos(
-                    np.inner(tmp_pred, tmp_true) / (np.linalg.norm(tmp_true) * np.linalg.norm(tmp_pred)))
-                num += 1
-    sam_deg = (sum_sam / num) * 180 / np.pi
-    return sam_deg
-
-
-def compare_corr(x_true, x_pred):
-    """
-    Calculate the cross correlation between x_pred and x_true.
-    求对应波段的相关系数，然后取均值
-    CC is a spatial measure.
-    """
-    x_true, x_pred = img_2d_mat(x_true=x_true, x_pred=x_pred)
-    x_true = x_true - np.mean(x_true, axis=1).reshape(-1, 1)
-    x_pred = x_pred - np.mean(x_pred, axis=1).reshape(-1, 1)
-    numerator = np.sum(x_true * x_pred, axis=1).reshape(-1, 1)
-    denominator = np.sqrt(np.sum(x_true * x_true, axis=1)
-                          * np.sum(x_pred * x_pred, axis=1)).reshape(-1, 1)
-    return (numerator / denominator).mean()
-
-
-def img_2d_mat(x_true, x_pred):
-    """
-    # 将三维的多光谱图像转为2位矩阵
-    :param x_true: (H, W, C)
-    :param x_pred: (H, W, C)
-    :return: a matrix which shape is (C, H * W)
-    """
-    h, w, c = x_true.shape
-    x_true, x_pred = x_true.astype(np.float32), x_pred.astype(np.float32)
-    x_mat = np.zeros((c, h * w), dtype=np.float32)
-    y_mat = np.zeros((c, h * w), dtype=np.float32)
-    for i in range(c):
-        x_mat[i] = x_true[:, :, i].reshape((1, -1))
-        y_mat[i] = x_pred[:, :, i].reshape((1, -1))
-    return x_mat, y_mat
-
+import lpips
+import torch
+import torchvision.transforms as transforms
 
 def compare_rmse(x_true, x_pred):
     """
@@ -119,38 +48,6 @@ def compare_mssim(x_true, x_pred, data_range, multidimension, detail=False):
         return np.mean(mssim)
 
 
-def compare_sid(x_true, x_pred):
-    """
-    SID is an information theoretic measure for spectral similarity and discriminability.
-    :param x_true:
-    :param x_pred:
-    :return:
-    """
-    x_true, x_pred = x_true.astype(np.float32), x_pred.astype(np.float32)
-    N = x_true.shape[2]
-    err = np.zeros(N)
-    for i in range(N):
-        err[i] = abs(np.sum(x_pred[:, :, i] * np.log10((x_pred[:, :, i] + 1e-3) / (x_true[:, :, i] + 1e-3))) +
-                     np.sum(x_true[:, :, i] * np.log10((x_true[:, :, i] + 1e-3) / (x_pred[:, :, i] + 1e-3))))
-    return np.mean(err / (x_true.shape[1] * x_true.shape[0]))
-
-
-def compare_appsa(x_true, x_pred):
-    """
-
-    :param x_true:
-    :param x_pred:
-    :return:
-    """
-    x_true, x_pred = x_true.astype(np.float32), x_pred.astype(np.float32)
-    nom = np.sum(x_true * x_pred, axis=2)
-    denom = np.linalg.norm(x_true, axis=2) * np.linalg.norm(x_pred, axis=2)
-
-    cos = np.where((nom / (denom + 1e-3)) > 1, 1, (nom / (denom + 1e-3)))
-    appsa = np.arccos(cos)
-    return np.sum(appsa) / (x_true.shape[1] * x_true.shape[0])
-
-
 def compare_mare(x_true, x_pred):
     """
 
@@ -193,16 +90,26 @@ def img_qi(img1, img2, block_size=8):
     return quality_map.mean()
 
 
-def compare_qave(x_true, x_pred, block_size=8):
-    n_bands = x_true.shape[2]
-    q_orig = np.zeros(n_bands)
-    for idim in range(n_bands):
-        q_orig[idim] = img_qi(x_true[:, :, idim],
-                              x_pred[:, :, idim], block_size)
-    return q_orig.mean()
+def cacul_lpips(img1, img2):
+    # 加载预训练的LPIPS网络
+    lpips_net = lpips.LPIPS(net='alex')
+    # 转换图像为模型可接受的格式
+    transform = transforms.ToTensor()
+    # 加载并转换图像
+    image1 = transform(img1)  # image1是第一个图像的数据，可以是PIL图像或NumPy数组
+    image2 = transform(img2)  # image2是第二个图像的数据，可以是PIL图像或NumPy数组
+
+    # 将图像扩展为四维张量 (batch_size=1)
+    image1 = image1.unsqueeze(0)
+    image2 = image2.unsqueeze(0)
+
+    # 将图像输入LPIPS网络进行计算
+    distance = lpips_net(image1, image2)
+    return distance.item()
 
 
-def quality_assessment(x_true, x_pred, data_range, ratio, multi_dimension=False):
+
+def quality_assessment(x_true, x_pred, data_range, multi_dimension=False):
     """
     :param multi_dimension:
     :param ratio:
@@ -216,8 +123,6 @@ def quality_assessment(x_true, x_pred, data_range, ratio, multi_dimension=False)
               'MSSIM': compare_mssim(x_true=x_true, x_pred=x_pred, data_range=data_range,
                                      multidimension=multi_dimension),
               #   'ERGAS': compare_ergas(x_true=x_true, x_pred=x_pred, ratio=ratio),
-              'SAM': compare_sam(x_true=x_true, x_pred=x_pred),
-              'CrossCorrelation': compare_corr(x_true=x_true, x_pred=x_pred),
               'RMSE': compare_rmse(x_true=x_true, x_pred=x_pred),
               }
     return result
@@ -231,15 +136,17 @@ def baseline_assessment(x_true, x_pred, data_range, multi_dimension=False):
 
 
 def tensor_accessment(x_true, x_pred, data_range, multi_dimension=False):
+    #将输入的Tensor从(batch_size, channels, height, width)的形式转置为(batch_size, height, width, channels)的形式，以便后续的评估函数能够正确处理图像数据
     x_true = x_true.transpose(0, 2, 3, 1)[0]
     x_pred = x_pred.transpose(0, 2, 3, 1)[0]
+    lpips = cacul_lpips(x_true, x_pred)
     mpsnr, psnrs = compare_mpsnr(x_true=x_true, x_pred=x_pred, data_range=data_range, detail=True)
     mssim, ssims = compare_mssim(x_true=x_true, x_pred=x_pred, data_range=data_range,
                                      multidimension=multi_dimension, detail=True)
-    return mpsnr, mssim, psnrs, ssims
+    return mpsnr, mssim, lpips, psnrs, ssims
 
 
-def batch_accessment(x_true, x_pred, data_range, ratio, multi_dimension=False):
+def batch_accessment(x_true, x_pred, data_range, multi_dimension=False):
     scores = []
     avg_score = {'MPSNR': 0, 'MSSIM': 0, 'SAM': 0,
                  'CrossCorrelation': 0, 'RMSE': 0}
@@ -248,7 +155,7 @@ def batch_accessment(x_true, x_pred, data_range, ratio, multi_dimension=False):
 
     for i in range(x_true.shape[0]):
         scores.append(quality_assessment(
-            x_true[i], x_pred[i], data_range, ratio, multi_dimension))
+            x_true[i], x_pred[i], data_range, multi_dimension))
     for met in avg_score.keys():
         avg_score[met] = np.mean([score[met] for score in scores])
     return avg_score
