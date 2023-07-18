@@ -3,7 +3,7 @@ data:
  params:
   train_dataset_dir: /share/program/dxs/Database/data/pngimage_train_HR
   val_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
-  test_dataset_dir: none
+  test_dataset_dir: /share/program/dxs/Database/data/
   crop_size: 256
   upscale_factor: 4
   batch_size: 5
@@ -35,8 +35,10 @@ model:
  attn_type: 'vanilla'
 trainer:
  max_epochs: 500
- gpus: 3
+ gpus: 4
  precision: 16
  accelerator: "ddp_spawn"
 callbacks:
  lr_scheduler: step
+other_params:
+ trainer_stage: 'test'

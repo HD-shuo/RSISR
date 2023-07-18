@@ -55,8 +55,24 @@ class MInterface(pl.LightningModule):
         self.log('lpips', lpips, on_step=False, on_epoch=True, prog_bar=True)
 
     def test_step(self, batch, batch_idx):
-        # Here we just reuse the validation_step for testing
-        return self.validation_step(batch, batch_idx)
+        lr, hr, _ = batch
+        input_tensor = lr.clone().detach()
+        #input_tensor = torch.tensor(lr)
+        sr_rgb = self(input_tensor)
+        #print(sr_rgb.size())
+        #sr_rgb = self(lr, hr)  # 使用模型进行高分辨率重建得到 RGB 图像
+        sr_rgb = quantize(sr_rgb, self.hparams.color_range)  # 对重建的图像进行量化处理（可选）
+        mpsnr, mssim, lpips, _, _ = tensor_accessment(
+            x_pred=sr_rgb.cpu().numpy(),
+            x_true=hr.cpu().numpy(),
+            data_range=self.hparams.color_range,
+            multi_dimension=False)
+        #new fid score calculation
+        fid_score = calculate_fid_score(hr.cpu().numpy(), sr_rgb.cpu().numpy(), hr.size(0))
+        self.log("fid_score", fid_score,on_step=False, on_epoch=True, prog_bar=True)
+        self.log('mpsnr', mpsnr, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('mssim', mssim, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('lpips', lpips, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self):
         # Make the Progress Bar leave there

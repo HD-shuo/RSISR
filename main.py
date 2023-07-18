@@ -10,6 +10,7 @@ from omegaconf import OmegaConf
 from torch.utils.data import random_split, DataLoader, Dataset, Subset
 from functools import partial
 from PIL import Image
+from datetime import datetime
 
 from pytorch_lightning import seed_everything
 from pytorch_lightning.trainer import Trainer
@@ -18,6 +19,7 @@ from pytorch_lightning.utilities.parsing import AttributeDict
 import pytorch_lightning.callbacks as plc
 from pytorch_lightning.utilities.distributed import rank_zero_only
 from pytorch_lightning.utilities import rank_zero_info
+from pytorch_lightning.loggers import TensorBoardLogger
 
 from ldm.util import instantiate_from_config
 from utils import load_model_path_by_args
@@ -148,14 +150,25 @@ def main(args):
         model = MInterface(**conf.model)
     else:
         model = MInterface(**conf.model)
-        conf.model.ckpt_path = load_path
+        model.load_state_dict(torch.load(load_path), strict=False)
     #print("model list:")
     #print(list(model.parameters()))
     #args.callbacks = load_callbacks(conf)
     # 创建回调函数实例
     callbacks = load_callbacks(conf)
-    trainer = Trainer(callbacks=callbacks, **conf.trainer)
-    trainer.fit(model, data_module)
+    # 创建logger
+    current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    train_logger = TensorBoardLogger(save_dir='/share/program/dxs/RSISR/logs/train_logs', name=f"train_{current_time}")
+    test_logger = TensorBoardLogger(save_dir='/share/program/dxs/RSISR/logs/test_logs', name=f"test_{current_time}")
+    flag = conf.other_params.trainer_stage
+    if flag == 'train':
+        trainer = Trainer(callbacks=callbacks, logger=train_logger, **conf.trainer)
+        trainer.fit(model, data_module)
+    elif flag == 'test':
+        trainer = Trainer(logger=test_logger, **conf.trainer)
+        trainer.test(model, data_module)
+    else:
+        raise ValueError("please specify the trainer mode")
 
 if __name__ == "__main__":
     parser = get_parser()

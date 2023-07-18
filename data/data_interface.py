@@ -27,17 +27,15 @@ class DInterface(pl.LightningDataModule):
             crop_size=self.params.crop_size,
             upscale_factor=self.params.upscale_factor
         )
-        """
         test_dataset = TestDatasetFromFolder(
             dataset_dir=self.params.test_dataset_dir,
             upscale_factor=self.params.upscale_factor
         )
-        """
 
         self.datasets = {
             "train": train_dataset,
             "validation": val_dataset,
-            #"test": test_dataset
+            "test": test_dataset
         }
 
     def train_dataloader(self):

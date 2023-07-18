@@ -107,8 +107,8 @@ class ValDatasetFromFolder2(Dataset):
 class TestDatasetFromFolder(Dataset):
     def __init__(self, dataset_dir, upscale_factor):
         super(TestDatasetFromFolder, self).__init__()
-        self.lr_path = dataset_dir + '/SRF_' + str(upscale_factor) + '/data/'
-        self.hr_path = dataset_dir + '/SRF_' + str(upscale_factor) + '/target/'
+        self.lr_path = dataset_dir + '/DIV2K_test_HR/'
+        self.hr_path = dataset_dir + '/DIV2K_valid_HR/'
         self.upscale_factor = upscale_factor
         self.lr_filenames = [join(self.lr_path, x) for x in listdir(self.lr_path) if is_image_file(x)]
         self.hr_filenames = [join(self.hr_path, x) for x in listdir(self.hr_path) if is_image_file(x)]
@@ -120,7 +120,9 @@ class TestDatasetFromFolder(Dataset):
         hr_image = Image.open(self.hr_filenames[index])
         hr_scale = Resize((self.upscale_factor * h, self.upscale_factor * w), interpolation=Image.BICUBIC)
         hr_restore_img = hr_scale(lr_image)
+        #返回一个包含图像名称、低分辨率图像Tensor、恢复后的高分辨率图像Tensor和原始高分辨率图像Tensor的元组。
         return image_name, ToTensor()(lr_image), ToTensor()(hr_restore_img), ToTensor()(hr_image)
+        
 
     def __len__(self):
         return len(self.lr_filenames)
