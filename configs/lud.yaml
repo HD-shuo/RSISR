@@ -1,0 +1,32 @@
+data:
+ target: data.data_interface.DInterface
+ params:
+  train_dataset_dir: /share/program/dxs/Database/data/pngimage_train_HR
+  val_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
+  test_dataset_dir: /share/program/dxs/Database/data/
+  crop_size: 256
+  upscale_factor: 4
+  batch_size: 5
+  wrap: bool
+model:
+ model_name: latent_upscale_diffusion
+ first_stage_config:
+ cond_stage_config:
+ num_timesteps_cond: None
+ cond_stage_key: "image"
+ cond_stage_trainable: False
+ concat_mode: True
+ cond_stage_forward: None
+ conditioning_key: None
+ scale_factor: 1.0
+ scale_by_std: False
+ force_null_conditioning: False
+trainer:
+ max_epochs: 500
+ gpus: 4
+ precision: 16
+ accelerator: "ddp_spawn"
+callbacks:
+ lr_scheduler: step
+other_params:
+ trainer_stage: 'train'

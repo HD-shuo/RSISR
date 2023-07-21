@@ -141,7 +141,7 @@ def load_callbacks(conf):
 
 
 def main(args):
-    configdir = "/share/program/dxs/RSISR/configs/ptp.yaml"
+    configdir = "/share/program/dxs/RSISR/configs/ddpm.yaml"
     conf = OmegaConf.load(configdir)
     pl.seed_everything(args.seed)
     load_path = load_model_path_by_args(conf.model)

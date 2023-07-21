@@ -6,11 +6,19 @@ data:
   test_dataset_dir: /share/program/dxs/Database/data/
   crop_size: 256
   upscale_factor: 4
-  batch_size: 5
+  batch_size: 100
   wrap: bool
 model:
- model_name: aediff_restore
- color_range: 255
+ model_name: ddpm_model
+ schedule_name: "linear_beta_schedule"
+ timesteps: 1000
+ beta_start: 0.0001
+ beta_end: 0.02
+ denoise_model: unet
+ unet:
+  image_size: 64
+  channels: 3
+  dim_mults: (1, 2, 4,)
  lr: 1.0e-04
  loss: l1
  weight_decay: 1e-5
@@ -21,30 +29,6 @@ model:
  checkpoint_loaddir: /share/program/dxs/RSISR/checkpoint
  checkpoint_version: 0
  load_v_num: 1
- en_num_res_blocks: 2
- en_attn_resolutions: []
- en_ch: 128
- en_resolution: 256
- en_out_ch: 3
- en_ch_mult: [1,2,4,4]
- ddp_num_res_blocks: 2
- ddp_attn_resolutions: [4,2,1]
- ddp_ch: 320
- ddp_ch_mult: [1,2,4,4]
- ddp_resolution: 256
- de_num_res_blocks: 2
- de_attn_resolutions: []
- de_resolution: 256
- de_ch: 128
- in_channels: 3
- out_channels: 3
- z_channels: 320
- resamp_with_conv: True
- resolution: 64
- use_linear_attn: True
- use_timestep: True
- attn_type: 'vanilla'
- t: 10
 trainer:
  max_epochs: 500
  gpus: 4

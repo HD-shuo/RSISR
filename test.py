@@ -1,3 +1,6 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,2"
+
 import torch
 from torchvision.transforms import ToTensor
 from PIL import Image
@@ -13,12 +16,21 @@ from model import MInterface
 def test(conf, importpath, savepath):
     # 加载模型权重
     model = MInterface(**conf.model)
-    model.load_state_dict(torch.load('/share/program/dxs/RSISR/checkpoint/best-epoch=59-mpsnr=70.85-mssim=0.999.ckpt'), strict=False)
+
+    #指定显卡
+    # device = torch.device('cuda:2')
+    # model.to(device)
+
+    model.load_state_dict(torch.load('/share/program/dxs/RSISR/checkpoint/last.ckpt'), strict=False)
+
 
     # 预处理图像
     image_path = importpath
     image = Image.open(image_path)
     image = ToTensor()(image)  # 转换为Tensor
+
+    # 将图像移动到指定的显卡设备
+    #image = image.to(device)
 
     # 执行推断
     model.eval()
@@ -37,6 +49,7 @@ def test(conf, importpath, savepath):
                     print("error")
     """
     img_np = np.transpose(result, (1, 2, 0))
+    print(img_np.shape)
     image_pil = Image.fromarray(img_np)
 
     img_name = os.path.basename(importpath)
@@ -47,7 +60,7 @@ def test(conf, importpath, savepath):
     image_pil.save(savepath)
 
 if __name__ == "__main__":
-    lr_path = "/share/program/dxs/RSISR/test_demo/agricultural08.png"
+    lr_path = "/share/program/dxs/RSISR/test_demo/intersection94.png"
     hr_path = "/share/program/dxs/RSISR/test_demo/"
     configdir = "/share/program/dxs/RSISR/configs/ptp.yaml"
     conf = OmegaConf.load(configdir)

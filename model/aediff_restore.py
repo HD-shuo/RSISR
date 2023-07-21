@@ -195,19 +195,26 @@ def make_attn(in_channels, attn_type="vanilla"):
 
 
 class DDPM(nn.Module):
-    def __init__(self, *, ch, out_ch, ch_mult=(1,2,4,8), num_res_blocks,
+    def __init__(self, *, ch, out_ch, t, ch_mult=(1,2,4,8), num_res_blocks,
                  attn_resolutions, dropout=0.0, resamp_with_conv=True, in_channels,
-                 resolution, use_timestep=True, use_linear_attn=False, attn_type="vanilla"):
+                 resolution, use_timestep=False, use_linear_attn=False, attn_type="vanilla"):
         super().__init__()
         if use_linear_attn: attn_type = "linear"
         self.ch = ch
-        self.temb_ch = self.ch*4
+        self.temb_ch = self.ch*3
         self.num_resolutions = len(ch_mult)
         self.num_res_blocks = num_res_blocks
         self.resolution = resolution
         self.in_channels = in_channels
 
         self.use_timestep = use_timestep
+        self.t = t
+        """
+        引入时间嵌入
+        时间步嵌入被用作一个可以学习的参数对象。
+        通过 temb.dense 属性,temb 对象包含了一个或多个线性层，用于将输入数据的通道数转换为时间步嵌入的通道数。
+        这样，时间步嵌入可以在每个残差块中与输入数据进行融合，以帮助模型学习到时间相关的特征。
+        """
         if self.use_timestep:
             # timestep embedding
             self.temb = nn.Module()
@@ -231,6 +238,7 @@ class DDPM(nn.Module):
         for i_level in range(self.num_resolutions):
             block = nn.ModuleList()
             attn = nn.ModuleList()
+            # block_in与block_out定义了每个残差块的输入输出通道数
             block_in = ch*in_ch_mult[i_level]
             block_out = ch*ch_mult[i_level]
             for i_block in range(self.num_res_blocks):
@@ -263,27 +271,40 @@ class DDPM(nn.Module):
 
         # upsampling
         self.up = nn.ModuleList()
+        # 逆序迭代所有分辨率层级(UNet层？)
         for i_level in reversed(range(self.num_resolutions)):
+            # 创建两个空模块list存储当前层级的残差块与注意力模块
             block = nn.ModuleList()
             attn = nn.ModuleList()
+            # 根据当前级别确定残差块的输出通道数与跳跃连接输入的通道数。
             block_out = ch*ch_mult[i_level]
             skip_in = ch*ch_mult[i_level]
+            # 创建残差block,迭代遍历当前级别中的残差块，包括最后一个额外的残差块
+            # 并将创建的残差块对象添加到当前级别的残差块列表中
             for i_block in range(self.num_res_blocks+1):
+                # 如果当前是最后一个残差块，更新跳跃连接输入的通道数。
                 if i_block == self.num_res_blocks:
                     skip_in = ch*in_ch_mult[i_level]
                 block.append(ResnetBlock(in_channels=block_in+skip_in,
                                          out_channels=block_out,
                                          temb_channels=self.temb_ch,
                                          dropout=dropout))
+                # 更新下一个残差块的输入通道数为当前残差块的输出通道数
                 block_in = block_out
+                # 如果当前分辨率在需要注意力机制的分辨率列表中,将创建的注意力机制对象添加到当前级别的注意力机制列表中
                 if curr_res in attn_resolutions:
                     attn.append(make_attn(block_in, attn_type=attn_type))
             up = nn.Module()
+            # 创建上采样模块
+            # 将当前级别的残差块与注意力模块列表赋值给上采样模块的 block与attn模块
             up.block = block
             up.attn = attn
+            # 如果当前级别不是最低级别，创建一个上采样操作对象，并赋值给上采样模块的 upsample属性，
             if i_level != 0:
                 up.upsample = Upsample(block_in, resamp_with_conv)
+                # 更新当前分辨率为原来的两倍
                 curr_res = curr_res * 2
+            # 将当前级别的上采样模块插入到列表的最前面，以保持一致的顺序(因为是倒序遍历，本质上是在创建这个UNet的半扇上采样)
             self.up.insert(0, up) # prepend to get consistent order
 
         # end
@@ -294,48 +315,75 @@ class DDPM(nn.Module):
                                         stride=1,
                                         padding=1)
 
-    def forward(self, x, t=None, context=None):
+    def forward(self, x, context=None):
         #assert x.shape[2] == x.shape[3] == self.resolution
+        # 如果上下文不是None,就把输入x与上下文进行拼接，设置temb为None
         if context is not None:
             # assume aligned context, cat along channel axis
             x = torch.cat((x, context), dim=1)
             temb = None
 
+        # 引入超分模型的时间嵌入,t是时间步数或是扩散步数的输入,t只在UNet单层内进行遍历t.unsqueeze(0).repeat(1, 1280).to('cuda:0')
+        if self.use_timestep:
+            t = torch.ones(self.ch)
+            temb = self.temb.dense[0](t)
+            temb = self.temb.dense[1](temb)
+        else:
+            temb = None
+
         # downsampling
+        # 将经过卷积层self.conv_in的输入x作为第一个特征图h
         hs = [self.conv_in(x)]
         temb = None
+        # 遍历多个分辨率级别及每个分辨率级别中的残差块
         for i_level in range(self.num_resolutions):
+            # 遍历每个分辨率级别中的多个残差块
             for i_block in range(self.num_res_blocks):
+                # 将当前特征图hs[-1]通过残差块self.down[i_level].block[i_block]进行处理，得到输出特征图h
                 h = self.down[i_level].block[i_block](hs[-1], temb)
+                # 如果当前分辨率级别的注意力机制列表不为空
                 if len(self.down[i_level].attn) > 0:
+                    # 将输出特征图h通过当前分辨率级别的注意力机制self.down[i_level].attn[i_block]进行处理
                     h = self.down[i_level].attn[i_block](h)
                 hs.append(h)
+            # 如果当前i_level不是最后一层，则添加下采样层
             if i_level != self.num_resolutions-1:
                 hs.append(self.down[i_level].downsample(hs[-1]))
 
         # middle
+        # 将当前特征图经过中间层处理
         h = hs[-1]
         h = self.mid.block_1(h, temb)
         h = self.mid.attn_1(h)
         h = self.mid.block_2(h, temb)
 
         # upsampling
+        # 从最高级别开始逆序遍历多个分辨率级别
         for i_level in reversed(range(self.num_resolutions)):
+            # 遍历每个分辨率级别中的多个残差块，包括一个额外的残差块
             for i_block in range(self.num_res_blocks+1):
+                # 将当前特征图h和弹出的特征图hs.pop()在通道维度上拼接，然后通过上采样模块self.up[i_level].block[i_block]进行处理，得到输出特征图h
                 h = self.up[i_level].block[i_block](
                     torch.cat([h, hs.pop()], dim=1), temb)
+                # 如果当前分辨率级别的注意力机制列表不为空,将输出特征图h通过当前分辨率级别的注意力机制
                 if len(self.up[i_level].attn) > 0:
                     h = self.up[i_level].attn[i_block](h)
+            # 如果当前级别不是最低级别,添加一个上采样模块
             if i_level != 0:
                 h = self.up[i_level].upsample(h)
 
         # end
+        # 对输出进行归一化与激活，再通过一个卷积层输出
         h = self.norm_out(h)
         h = nonlinearity(h)
         h = self.conv_out(h)
         return h
 
     def get_last_layer(self):
+        """
+        定义了一个get_last_layer方法。
+        返回最后一层卷积层self.conv_out的权重参数。
+        """
         return self.conv_out.weight
     
 
@@ -671,15 +719,18 @@ class MergedRescaleDecoder(nn.Module):
         return x
 
 class AediffRestore(nn.Module):
-    def __init__(self,in_channels, out_channels, z_channels, out_ch, resolution, num_res_blocks, attn_resolutions, ch, ch_mult=(1,2,4,8),
-                 dropout=0.0, resamp_with_conv=True, rescale_factor=1.0, rescale_module_depth=1):
+    def __init__(self,in_channels, out_channels, z_channels, t,
+                 en_ch, en_out_ch, en_resolution, en_ch_mult, en_num_res_blocks, en_attn_resolutions, 
+                 ddp_num_res_blocks,ddp_attn_resolutions, ddp_ch, ddp_ch_mult, ddp_resolution,
+                 de_num_res_blocks,de_attn_resolutions, de_resolution, de_ch,
+                 dropout=0.1, resamp_with_conv=True, rescale_factor=1.0, rescale_module_depth=1):
         super().__init__()
-        self.mergedrescaleencoder = MergedRescaleEncoder(in_channels= in_channels, ch = ch, resolution=resolution, out_ch=out_ch, num_res_blocks=num_res_blocks,
-                 attn_resolutions=attn_resolutions, dropout=0.0, resamp_with_conv=True,
-                 ch_mult=ch_mult, rescale_factor=1.0, rescale_module_depth=1) 
-        self.ddpm = DDPM(ch=ch, out_ch=out_ch, ch_mult=(1,2,4,8), num_res_blocks=num_res_blocks,resolution=resolution,
-                 attn_resolutions=attn_resolutions, dropout=0.0, resamp_with_conv=True, in_channels=256,)
-        self.mergedrescaledecoder = MergedRescaleDecoder(z_channels, out_ch, resolution=resolution, num_res_blocks=num_res_blocks, attn_resolutions=attn_resolutions, ch=ch, ch_mult=(1,2,4,8),
+        self.mergedrescaleencoder = MergedRescaleEncoder(in_channels= in_channels, ch = en_ch, resolution=en_resolution, out_ch=en_out_ch, num_res_blocks=en_num_res_blocks,
+                 attn_resolutions=en_attn_resolutions, dropout=0.0, resamp_with_conv=True,
+                 ch_mult=en_ch_mult, rescale_factor=1.0, rescale_module_depth=1) 
+        self.ddpm = DDPM(ch=ddp_ch, out_ch=ddp_ch, t = t, ch_mult=ddp_ch_mult, num_res_blocks=ddp_num_res_blocks,resolution=ddp_resolution,
+                 attn_resolutions=ddp_attn_resolutions, dropout=0.1, resamp_with_conv=True, in_channels=en_out_ch,)
+        self.mergedrescaledecoder = MergedRescaleDecoder(z_channels, out_ch=320, resolution=de_resolution, num_res_blocks=de_num_res_blocks, attn_resolutions=de_attn_resolutions, ch=de_ch, ch_mult=(1,2,4,4),
                  dropout=0.0, resamp_with_conv=True, rescale_factor=1.0, rescale_module_depth=1)
         self.upsample = Upsample(in_channels=out_channels, with_conv=resamp_with_conv)
 
