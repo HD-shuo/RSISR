@@ -13,7 +13,8 @@ def is_image_file(filename):
 def calculate_valid_crop_size(crop_size, upscale_factor):
     return crop_size - (crop_size % upscale_factor)
 
-
+# 将输入的高分辨率图像调整到指定的大小（crop_size x crop_size），使用BICUBIC插值进行插值，以保留图像的质量和细节
+# 将处理后的图像转换为PyTorch张量的格式
 def train_hr_transform(crop_size):
     return Compose([
         Resize((crop_size,crop_size), interpolation=Image.BICUBIC),

@@ -18,7 +18,7 @@ model:
  lr_decay_steps: 20
  lr_decay_rate: 0.5
  lr_decay_min_lr: 1e-5
- checkpoint_loaddir: /share/program/dxs/RSISR/checkpoint
+ checkpoint_loaddir: /share/program/dxs/RSISR/checkpoint/
  checkpoint_version: 0
  load_v_num: 1
  en_num_res_blocks: 2

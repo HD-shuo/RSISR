@@ -127,7 +127,7 @@ def load_callbacks(conf):
 
     callbacks.append(plc.ModelCheckpoint(
         monitor='mpsnr',
-        filename='best-{epoch:02d}-{mpsnr:.2f}-{mssim:.3f}',
+        filename='best-{epoch:02d}-{mpsnr:.2f}-{mssim:.3f}--{fid_score:.2f}--{lpips:.2f}',
         save_top_k=1,
         mode='max',
         save_last=True,
