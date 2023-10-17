@@ -31,7 +31,7 @@ model:
  load_v_num: 1
 trainer:
  max_epochs: 500
- gpus: 4
+ gpus: 2
  precision: 16
  accelerator: "ddp_spawn"
 callbacks:
