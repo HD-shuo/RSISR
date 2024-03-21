@@ -25,7 +25,7 @@ from pytorch_lightning.utilities import rank_zero_info
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from ldm.util import instantiate_from_config
-from utils import load_model_path_by_args
+from utils.model_utils import load_model_path_by_args
 from data import DInterface
 from model import MInterface
 from diffusers import DiffusionPipeline

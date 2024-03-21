@@ -1,4 +1,4 @@
-name: ldm
+name: daixingshuo_rsisr
 channels:
   - pytorch
   - defaults

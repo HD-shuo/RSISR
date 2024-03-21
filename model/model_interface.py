@@ -8,7 +8,7 @@ import torch.optim.lr_scheduler as lrs
 
 import pytorch_lightning as pl
 from model.metrics import tensor_accessment
-from model.utils import quantize
+from model.utils.utils import quantize
 from model.fid_score import calculate_fid_score
 
 

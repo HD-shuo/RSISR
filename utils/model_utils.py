@@ -1,5 +1,5 @@
 import os
-from pathlib2 import Path
+from pathlib import Path
 
 def load_model_path(root=None, version=None, v_num=None, best=False):
     """ When best = True, return the best model's path in a directory 

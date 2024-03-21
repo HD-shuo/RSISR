@@ -1,0 +1,4 @@
+encoder:
+ model_path: "/home/work/daixingshuo/RSISR/pretrain_weights"
+decoder:
+ model_path: "/home/work/daixingshuo/RSISR/pretrain_weights"

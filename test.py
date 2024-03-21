@@ -11,7 +11,7 @@ from omegaconf import OmegaConf
 import numpy as np
 import scipy.misc
 from model import MInterface
-from model.utils import quantize
+from model.utils.utils import quantize
 
 
 def test(conf, importpath, savepath):
@@ -41,7 +41,7 @@ def test(conf, importpath, savepath):
     # 后处理输出
     result = quantize(output, 255)  # 对重建的图像进行量化处理（可选）
     result = output.squeeze().cpu().numpy()  # 移除批次维度并转换为NumPy数组
-    result = (result*255).astype(np.uint8)
+    result = (result * 255).astype(np.uint8)
    
     img_np = np.transpose(result, (1, 2, 0))
     print(img_np.shape)

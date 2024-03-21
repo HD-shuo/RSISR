@@ -90,8 +90,10 @@ class DDPM(pl.LightningModule):
         self.channels = channels
         self.use_positional_encodings = use_positional_encodings
         self.model = DiffusionWrapper(unet_config, conditioning_key)
+        # 计算模型参数量
         count_params(self.model, verbose=True)
         self.use_ema = use_ema
+        # 是否使用ema
         if self.use_ema:
             self.model_ema = LitEma(self.model)
             print(f"Keeping EMAs of {len(list(self.model_ema.buffers()))}.")
@@ -100,33 +102,41 @@ class DDPM(pl.LightningModule):
         if self.use_scheduler:
             self.scheduler_config = scheduler_config
 
+        # 后验方差权重
         self.v_posterior = v_posterior
         self.original_elbo_weight = original_elbo_weight
         self.l_simple_weight = l_simple_weight
 
+        # 监视器设置
         if monitor is not None:
             self.monitor = monitor
         self.make_it_fit = make_it_fit
         if reset_ema: assert exists(ckpt_path)
+        # 从权重路径初始化模型，并判断是否进行ema操作
         if ckpt_path is not None:
             self.init_from_ckpt(ckpt_path, ignore_keys=ignore_keys, only_model=load_only_unet)
             if reset_ema:
                 assert self.use_ema
                 print(f"Resetting ema to pure model weights. This is useful when restoring from an ema-only checkpoint.")
                 self.model_ema = LitEma(self.model)
+        # 重置ema的更新次数
         if reset_num_ema_updates:
             print(" +++++++++++ WARNING: RESETTING NUM_EMA UPDATES TO ZERO +++++++++++ ")
             assert self.use_ema
             self.model_ema.reset_num_updates()
-
+        
+        # 注册schedule
         self.register_schedule(given_betas=given_betas, beta_schedule=beta_schedule, timesteps=timesteps,
                                linear_start=linear_start, linear_end=linear_end, cosine_s=cosine_s)
 
+        # 损失类型
         self.loss_type = loss_type
 
         self.learn_logvar = learn_logvar
+        # 初始化对数方差张量
         self.logvar = torch.full(fill_value=logvar_init, size=(self.num_timesteps,))
         if self.learn_logvar:
+            # 若要学习对数方差，则将其注册为模型参数
             self.logvar = nn.Parameter(self.logvar, requires_grad=True)
 
         self.ucg_training = ucg_training or dict()
