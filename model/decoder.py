@@ -20,7 +20,7 @@ class Decoder(nn.Module):
             params:
         """
         super().__init__()
-        self.model_path = conf.decoder.model_path
+        self.model_path = conf.model_path
         self.model = None
         self.post_quant = None
         self._init_decoder_model(self.model_path)
@@ -76,7 +76,11 @@ if __name__ == "__main__":
     decoder = Decoder(conf)
     # test
     from model.encoder import Encoder
+    from model.ddpm_model import DdpmModel
     encoder = Encoder(conf)
+    ddpm = DdpmModel()
+    # time embedding
+    t = torch.randint(1000, (2, ))
     test_images = []
     test_img1 = '/home/work/daixingshuo/RSISR/test_demo/intersection94.png'
     test_img2 = '/home/work/daixingshuo/RSISR/test_demo/agricultural08.png'
@@ -89,5 +93,6 @@ if __name__ == "__main__":
     test_tensors = encoder.preprocess(test_images)
     posterior = encoder(test_tensors).latent_dist
     z = posterior.mode()
-    output_features = decoder(z)
+    z_output = ddpm(z, t)
+    output_features = decoder(z_output)
     print(output_features.shape)

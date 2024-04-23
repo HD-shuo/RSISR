@@ -23,7 +23,7 @@ class Encoder(nn.Module):
             params:
         """
         super().__init__()
-        self.model_path = conf.encoder.model_path
+        self.model_path = conf.model_path
         self.model = None
         self._init_encoder_model(self.model_path)
         self._init_quant_conv(self.model_path)

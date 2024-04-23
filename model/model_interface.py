@@ -135,7 +135,6 @@ class MInterface(pl.LightningModule):
         except:
             raise ValueError(
                 f'Invalid Module File Name or Invalid Class Name {name}.{camel_name}!')
-        print(type(Model))
         self.model = self.instancialize(Model)
 
     def instancialize(self, Model, class_name="Model", **other_args):

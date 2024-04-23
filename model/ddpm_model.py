@@ -1,6 +1,3 @@
-import sys
-sys.path.append('/share/program/dxs/RSISR')
-
 import math
 from typing import Optional, Tuple, Union, List
 
@@ -9,6 +6,10 @@ from torch import nn
 
 from labml_helpers.module import Module
 from omegaconf import OmegaConf
+from PIL import Image
+import numpy as np
+
+from model.encoder import Encoder
 
 
 class Swish(Module):
@@ -52,6 +53,7 @@ class TimeEmbedding(nn.Module):
         # where $d$ is `half_dim`
         half_dim = self.n_channels // 8
         emb = math.log(10_000) / (half_dim - 1)
+        # create the embeddings, emb = t*emb
         emb = torch.exp(torch.arange(half_dim, device=t.device) * -emb)
         emb = t[:, None] * emb[None, :]
         emb = torch.cat((emb.sin(), emb.cos()), dim=1)
@@ -291,7 +293,7 @@ class DdpmModel(Module):
     ## U-Net
     """
 
-    def __init__(self, image_channels: int = 3, n_channels: int = 64,
+    def __init__(self, image_channels: int = 4, n_channels: int = 64,
                  ch_mults: Union[Tuple[int, ...], List[int]] = (1, 2, 2, 4),
                  is_attn: Union[Tuple[bool, ...], List[int]] = (False, False, True, True),
                  n_blocks: int = 2):
@@ -398,9 +400,26 @@ class DdpmModel(Module):
         return self.final(self.act(self.norm(x)))
 
 if __name__ == "__main__":
-    configdir = "/home/work/daixingshuo/RSISR/configs/ddpm.yaml"
-    conf = OmegaConf.load(configdir)
-    ddpm = DdpmModel(**conf.model.ddpm_params)
-
-    test_img = "/home/work/daixingshuo/RSISR/test_demo/hr_agricultural08.png"
+    confdir = "/home/work/daixingshuo/RSISR/configs/model.yaml"
+    conf = OmegaConf.load(confdir)
+    encoder = Encoder(conf)
+    ddpm = DdpmModel()
+    # time embedding
+    t = torch.randint(1000, (2, ))
+    # test
+    test_images = []
+    test_img1 = '/home/work/daixingshuo/RSISR/test_demo/intersection94.png'
+    test_img2 = '/home/work/daixingshuo/RSISR/test_demo/agricultural08.png'
+    test_img1 = Image.open(test_img1).convert("RGB")
+    test_img1 = np.array(test_img1)
+    test_images.append(test_img1)
+    test_img2 = Image.open(test_img2).convert("RGB")
+    test_img2 = np.array(test_img2)
+    test_images.append(test_img2)
+    test_tensors = encoder.preprocess(test_images)
+    # print(test_tensors.shape)
+    posterior = encoder(test_tensors).latent_dist
+    z = posterior.mode()
+    features = ddpm(z, t)
+    print(features.shape)
     

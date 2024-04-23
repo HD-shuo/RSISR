@@ -1,15 +1,15 @@
 data:
  target: data.data_interface.DInterface
  params:
-  train_dataset_dir: /share/program/dxs/Database/data/pngimage_train_HR
-  val_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
-  test_dataset_dir: none
+  train_dataset_dir: /home/work/daixingshuo/RSISR/dataset/data/pngimage_train_HR
+  val_dataset_dir: /home/work/daixingshuo/RSISR/dataset/data/pngimage2_valid_HR
+  test_dataset_dir: /home/work/daixingshuo/RSISR/dataset/data
   crop_size: 256
   upscale_factor: 4
   batch_size: 5
   wrap: bool
 model:
- model_name: consistency
+ model_name: upscale_model
  color_range: 255
  lr: 1.0e-04
  loss: l1
@@ -22,21 +22,17 @@ model:
  checkpoint_version: 0
  load_v_num: 1
  image_size: 256
- in_channels: 3
- model_channels: 128
- out_channels: 3
- num_res_blocks: 2
- attention_ds: [8,16,32]
- dropout: 0.0
- channel_mult: (1, 1, 2, 2, 4, 4)
- use_checkpoint: False
- use_fp16: False
- num_heads: 4
- num_head_channels: -1
- num_heads_upsample: -1
- use_scale_shift_norm: True
- resblock_updown: False
- use_new_attention_order: False
+ model_config:
+  upsample:
+   in_channels: 3
+   out_channels: 3
+   attn: 'ch_att'
+   upscale_factor: 4
+  encoder:
+   model_path: "/home/work/daixingshuo/RSISR/pretrain_weights"
+  ddpm: 
+  decoder:
+   model_path: "/home/work/daixingshuo/RSISR/pretrain_weights"
 trainer:
  max_epochs: 500
  gpus: 3
@@ -44,3 +40,6 @@ trainer:
  accelerator: "ddp_spawn"
 callbacks:
  lr_scheduler: step
+other_params:
+ trainer_stage: 'train'
+ seed: 23

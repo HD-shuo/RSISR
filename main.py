@@ -1,7 +1,5 @@
 import argparse, os, sys, datetime, glob, importlib, csv
 
-os.environ["HUGGINGFACE_HOME"] = "/share/program/dxs/huggingface"
-
 import numpy as np
 import time
 import torch
@@ -55,7 +53,7 @@ def load_callbacks(conf):
 
 
 def main():
-    configdir = "/home/work/daixingshuo/RSISR/configs/ddpm.yaml"
+    configdir = "/home/work/daixingshuo/RSISR/configs/cons.yaml"
     conf = OmegaConf.load(configdir)
     seed = conf.other_params.seed
     pl.seed_everything(seed)
@@ -80,8 +78,8 @@ def main():
     callbacks = load_callbacks(conf)
     # 创建logger
     current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    train_logger = TensorBoardLogger(save_dir='/share/program/dxs/RSISR/logs/train_logs', name=f"train_{current_time}")
-    test_logger = TensorBoardLogger(save_dir='/share/program/dxs/RSISR/logs/test_logs', name=f"test_{current_time}")
+    train_logger = TensorBoardLogger(save_dir='log/train_logs', name=f"train_{current_time}")
+    test_logger = TensorBoardLogger(save_dir='log/test_logs', name=f"test_{current_time}")
     flag = conf.other_params.trainer_stage
     if flag == 'train':
         trainer = Trainer(callbacks=callbacks, logger=train_logger, **conf.trainer)

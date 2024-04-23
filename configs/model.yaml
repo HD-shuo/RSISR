@@ -1,4 +1,10 @@
+upsample:
+ in_channels: 3
+ out_channels: 3
+ attn: 'ch_att'
+ upscale_factor: 4
 encoder:
  model_path: "/home/work/daixingshuo/RSISR/pretrain_weights"
+ddpm: 
 decoder:
  model_path: "/home/work/daixingshuo/RSISR/pretrain_weights"
