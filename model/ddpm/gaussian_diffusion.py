@@ -4,6 +4,8 @@ the code is from https://github.com/openai/improved-diffusion/gaussian_diffusion
 import math
 import enum
 import numpy as np
+import torch as th
+import torch.nn as nn
 
 
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
@@ -193,6 +195,7 @@ class GaussianDiffusion(nn.Module):
         :return: A noisy version of x_start.
         """
         if noise is None:
+            x_start = x_start.float()
             noise = th.randn_like(x_start)
         assert noise.shape == x_start.shape
         return (

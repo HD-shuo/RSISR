@@ -59,7 +59,7 @@ def main():
     pl.seed_everything(seed)
     load_path = load_model_path_by_args(conf.model)
     #for test pre_model
-    load_path = None
+    #load_path = None
 
     # data
     data_module = DInterface(**conf.data)

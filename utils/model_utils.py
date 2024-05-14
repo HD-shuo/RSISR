@@ -26,7 +26,7 @@ def load_model_path(root=None, version=None, v_num=None, best=False):
         else:
             return str(Path('lightning_logs', f'version_{v_num}', 'checkpoints'))
 
-    if root==version==v_num==None:
+    if root==version==v_num=='None':
         return None
 
     root = generate_root()

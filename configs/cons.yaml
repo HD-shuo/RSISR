@@ -6,7 +6,7 @@ data:
   test_dataset_dir: /home/work/daixingshuo/RSISR/dataset/data
   crop_size: 256
   upscale_factor: 4
-  batch_size: 5
+  batch_size: 1
   wrap: bool
 model:
  model_name: upscale_model
@@ -18,9 +18,9 @@ model:
  lr_decay_steps: 20
  lr_decay_rate: 0.5
  lr_decay_min_lr: 1e-5
- checkpoint_loaddir: /share/program/dxs/RSISR/checkpoint
- checkpoint_version: 0
- load_v_num: 1
+ checkpoint_loaddir: None
+ checkpoint_version: None
+ load_v_num: None
  image_size: 256
  model_config:
   upsample:
@@ -31,6 +31,8 @@ model:
   encoder:
    model_path: "/home/work/daixingshuo/RSISR/pretrain_weights"
   ddpm: 
+   T: 1000
+   beta_schedule: "linear"
   decoder:
    model_path: "/home/work/daixingshuo/RSISR/pretrain_weights"
 trainer:
