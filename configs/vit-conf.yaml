@@ -4,12 +4,12 @@ data:
   train_dataset_dir: /share/program/dxs/Database/data/pngimage_train_HR
   val_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
   test_dataset_dir: /share/program/dxs/Database/data
-  crop_size: 256
+  crop_size: 224
   upscale_factor: 4
   batch_size: 4
   wrap: bool
 model:
- model_name: upscale_model
+ model_name: vit_upscale
  color_range: 255
  lr: 1.0e-04
  loss: l1
@@ -23,24 +23,21 @@ model:
  load_v_num: None
  image_size: 256
  model_config:
+  img_size: 224
+  ch: 3
   upsample:
    in_channels: 3
    out_channels: 3
    attn: 'ch_att'
    upscale_factor: 4
-  encoder:
-   model_path: "/share/program/dxs/RSISR/pretrain_weights"
   ddpm: 
    T: 1000
    beta_schedule: "linear"
-  decoder:
-   model_path: "/share/program/dxs/RSISR/pretrain_weights"
 trainer:
- max_epochs: 100
- devices: 4
- precision: 'bf16'
- accelerator: "gpu"
- strategy: 'ddp_find_unused_parameters_true'
+ max_epochs: 200
+ gpus: 4
+ precision: 16
+ accelerator: "ddp_spawn"
 callbacks:
  lr_scheduler: step
 other_params:

@@ -3,7 +3,8 @@ from os.path import join
 
 from PIL import Image
 from torch.utils.data.dataset import Dataset
-from torchvision.transforms import Compose, RandomCrop, ToTensor, ToPILImage, CenterCrop, Resize,transforms
+from torchvision.transforms import Compose, RandomCrop, ToTensor, ToPILImage, CenterCrop, Resize, transforms
+from torchvision.transforms.functional import InterpolationMode
 
 
 def is_image_file(filename):
@@ -17,10 +18,10 @@ def calculate_valid_crop_size(crop_size, upscale_factor):
 # 将处理后的图像转换为PyTorch张量的格式
 def train_hr_transform(crop_size):
     return Compose([
-        Resize((crop_size,crop_size), interpolation=Image.BICUBIC),
+        Resize((crop_size,crop_size), interpolation=InterpolationMode.BICUBIC),
         #RandomCrop(crop_size),
         ToTensor(),
-        #transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
 
@@ -34,8 +35,9 @@ def train_lr_transform(crop_size, upscale_factor):
     """
     transformed = Compose([
         ToPILImage(),
-        Resize(crop_size // upscale_factor, interpolation=Image.BICUBIC),
-        ToTensor()
+        Resize(crop_size // upscale_factor, interpolation=InterpolationMode.BICUBIC),
+        ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     print("After resizing: size =", crop_size // upscale_factor)
     return transformed
@@ -77,8 +79,8 @@ class ValDatasetFromFolder(Dataset):
         hr_image = Image.open(self.image_filenames[index])
         w, h = hr_image.size
         #crop_size = calculate_valid_crop_size(min(w, h), self.upscale_factor)
-        lr_scale = Resize(self.crop_size // self.upscale_factor, interpolation=Image.BICUBIC)
-        hr_scale = Resize((self.crop_size,self.crop_size), interpolation=Image.BICUBIC)
+        lr_scale = Resize(self.crop_size // self.upscale_factor, interpolation=InterpolationMode.BICUBIC)
+        hr_scale = Resize((self.crop_size,self.crop_size), interpolation=InterpolationMode.BICUBIC)
         hr_image = hr_scale(hr_image)
         lr_image = lr_scale(hr_image)
         hr_restore_img = hr_scale(lr_image)
@@ -98,7 +100,7 @@ class ValDatasetFromFolder2(Dataset):
     def __getitem__(self, index):
         hr_image = self.hr_transform(Image.open(self.image_filenames[index]))
         lr_image = self.lr_transform(hr_image)
-        hr_scale = Resize(self.crop_size, interpolation=Image.BICUBIC)
+        hr_scale = Resize(self.crop_size, interpolation=InterpolationMode.BICUBIC)
         hr_restore_img = hr_scale(lr_image)       
         return ToTensor()(lr_image), ToTensor()(hr_restore_img), ToTensor()(hr_image)
 
@@ -119,7 +121,7 @@ class TestDatasetFromFolder(Dataset):
         lr_image = Image.open(self.lr_filenames[index])
         w, h = lr_image.size
         hr_image = Image.open(self.hr_filenames[index])
-        hr_scale = Resize((self.upscale_factor * h, self.upscale_factor * w), interpolation=Image.BICUBIC)
+        hr_scale = Resize((self.upscale_factor * h, self.upscale_factor * w), interpolation=InterpolationMode.BICUBIC)
         hr_restore_img = hr_scale(lr_image)
         #返回一个包含图像名称、低分辨率图像Tensor、恢复后的高分辨率图像Tensor和原始高分辨率图像Tensor的元组。
         return image_name, ToTensor()(lr_image), ToTensor()(hr_restore_img), ToTensor()(hr_image)

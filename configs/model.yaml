@@ -4,7 +4,11 @@ upsample:
  attn: 'ch_att'
  upscale_factor: 4
 encoder:
- model_path: "/home/work/daixingshuo/RSISR/pretrain_weights"
+ model_path: "/share/program/dxs/RSISR/pretrain_weights"
 ddpm: 
+ T: 1000
+ beta_schedule: "linear"
 decoder:
- model_path: "/home/work/daixingshuo/RSISR/pretrain_weights"
+ model_path: "/share/program/dxs/RSISR/pretrain_weights"
+img_size: 256
+ch: 3

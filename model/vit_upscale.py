@@ -6,12 +6,11 @@ import cv2
 
 import torch
 import torch.nn as nn
+import torchvision
 from torchvision.transforms import Compose,ToTensor, ToPILImage, Resize
+from torchvision.transforms.functional import InterpolationMode
 
-from model.encoder import Encoder
 from model.ddpm_model import DdpmModel
-from model.decoder import Decoder
-from model.ddpm.gaussian_diffusion import GaussianDiffusion
 from model.ddpm.gaussian_diffusion import get_named_beta_schedule
 
 
@@ -97,7 +96,7 @@ class UpsampleModule(nn.Module):
         return x
 
 
-class UpscaleModel(nn.Module):
+class VitUpscale(nn.Module):
     """
         init upscale model     
     """
@@ -106,10 +105,10 @@ class UpscaleModel(nn.Module):
         self.configs = model_config
         # 初始化time_embedding
         # 初始化模型
-        self.encoder = Encoder(model_config.encoder)
+        self.vit = torchvision.models.vit_b_16(pretrained=True)
         self.ddpm = DdpmModel()
-        self.decoder = Decoder(model_config.decoder)
         self.upsample = UpsampleModule(model_config.upsample)
+        self.proj = nn.Linear(1000, 3*model_config.img_size * model_config.img_size)
 
         # noise and ddpm caculation schedule
         self.T = model_config.ddpm.T
@@ -151,32 +150,31 @@ class UpscaleModel(nn.Module):
         )
 
     def forward(self, x):
+        conf = self.configs
         # noise scheduel
         t = torch.randint(self.T, size=(x.shape[0], ), device=x.device)
-        # noise = torch.randn_like(x)
         x = self.upsample(x)
-        x = self.encoder(x)
-        
-        posterior = x.latent_dist
-        z = posterior.mode()
-        noise = torch.randn_like(z)
+        x = self.vit(x)
+        x = self.proj(x)
+        bs = x.size(0)
+        x = x.view(bs, conf.ch, conf.img_size, conf.img_size)
+        noise = torch.randn_like(x)
         # ddpm
-        xt = self.q_sample(z, t, noise)
+        xt = self.q_sample(x, t, noise)
         x = self.ddpm(xt, t)
-        x = self.decoder(x)
         return x
 
 def train_lr_transform(crop_size, upscale_factor, images):
     transform = Compose([
         ToPILImage(),
-        Resize(crop_size // upscale_factor, interpolation=Image.BICUBIC),
+        Resize(crop_size // upscale_factor, interpolation=InterpolationMode.BICUBIC),
         ToTensor()
     ])
     for i in range(len(images)):
-        img = cv2.resize(images[i], (256, 256))
+        img = cv2.resize(images[i], (crop_size, crop_size))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = transform(img)
-        images[i] = torch.tensor(img)
+        images[i] = img.clone().detach() 
     images = torch.stack(images)
     return images
 
@@ -186,8 +184,7 @@ if __name__ == "__main__":
     confdir = "/share/program/dxs/RSISR/configs/model.yaml"
     conf = OmegaConf.load(confdir)
     # load model
-    encoder = Encoder(conf.encoder)
-    upscale_model = UpscaleModel(conf)
+    upscale_model = VitUpscale(conf)
     # test
     # time embedding
     t = torch.randint(1000, (2, ))
@@ -202,6 +199,6 @@ if __name__ == "__main__":
     test_img2 = np.array(test_img2)
     test_images.append(test_img2)
     test_images.append(test_img2)
-    test_tensors = train_lr_transform(256, 4, test_images)
+    test_tensors = train_lr_transform(224, 4, test_images)
     output_features = upscale_model(test_tensors)
     print(output_features.shape)

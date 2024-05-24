@@ -54,7 +54,6 @@ class DInterface(pl.LightningDataModule):
             val_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            shuffle=shuffle
         )
 
     def test_dataloader(self, shuffle=False):

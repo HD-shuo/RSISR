@@ -18,7 +18,6 @@ from pytorch_lightning.trainer import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, Callback, LearningRateMonitor
 from pytorch_lightning.utilities.parsing import AttributeDict
 import pytorch_lightning.callbacks as plc
-from pytorch_lightning.utilities.distributed import rank_zero_only
 from pytorch_lightning.utilities import rank_zero_info
 from pytorch_lightning.loggers import TensorBoardLogger
 
@@ -43,7 +42,7 @@ def load_callbacks(conf):
         save_top_k=1,
         mode='max',
         save_last=True,
-        dirpath='/home/work/daixingshuo/RSISR/checkpoint'
+        dirpath='/share/program/dxs/RSISR/checkpoint'
     ))
 
     if conf.model.lr_scheduler:
@@ -53,7 +52,8 @@ def load_callbacks(conf):
 
 
 def main():
-    configdir = "/home/work/daixingshuo/RSISR/configs/cons.yaml"
+    configdir = "/share/program/dxs/RSISR/configs/cons.yaml"
+    # configdir = "/share/program/dxs/RSISR/configs/vit-conf.yaml"
     conf = OmegaConf.load(configdir)
     seed = conf.other_params.seed
     pl.seed_everything(seed)
@@ -70,7 +70,7 @@ def main():
     else:
         model = MInterface(**conf.model)
         model.load_state_dict(torch.load(load_path), strict=False)
-    
+    model.eval()
     # 加载预训练模型
     #pipeline = DiffusionPipeline.from_pretrained("/share/program/dxs/huggingface/stable-diffusion-xl-refiner-0.9", torch_dtype=torch.float16, use_safetensors=True, variant="fp16")
     #pipeline.to("cuda")

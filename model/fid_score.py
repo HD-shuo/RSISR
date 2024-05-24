@@ -16,6 +16,8 @@ def calculate_activation_statistics(images, model, batch_size=50, dims=2048):
         with torch.no_grad():
             act = model(batch)
 
+        if act.dtype == torch.bfloat16:
+            act = act.float()
         act = act.cpu().numpy()
         batch_size = act.shape[0]
         act_values = np.resize(act_values, act.shape)
@@ -40,6 +42,7 @@ def calculate_fid_score(real_images: np.array, generated_images, batch_size=50):
 
     realimage_list = []
     for image in real_images:
+        assert np.all((image >= 0)&(image<=1))
         image = (image * 255).astype(np.uint8)
         image = np.transpose(image, (1, 2, 0))
         image = TF.to_pil_image(image)

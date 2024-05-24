@@ -28,7 +28,7 @@ class MInterface(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         lr, hr  = batch
-        input_tensor = lr.clone().detach()
+        input_tensor = lr.clone()
         sr_rgb = self(input_tensor)  # 使用模型进行高分辨率重建得到 RGB 图像
         loss = self.loss_function(sr_rgb, hr)  # 计算损失函数
         self.log('loss', loss, on_step=True, on_epoch=True, prog_bar=True)
@@ -41,6 +41,8 @@ class MInterface(pl.LightningModule):
         sr_rgb = self(input_tensor)
         #print(sr_rgb.size())
         #sr_rgb = self(lr, hr)  # 使用模型进行高分辨率重建得到 RGB 图像
+        if sr_rgb.dtype == torch.bfloat16:
+            sr_rgb = sr_rgb.float()
         sr_rgb = quantize(sr_rgb, self.hparams.color_range)  # 对重建的图像进行量化处理（可选）
         mpsnr, mssim, lpips, _, _ = tensor_accessment(
             x_pred=sr_rgb.cpu().numpy(),
