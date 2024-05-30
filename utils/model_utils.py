@@ -26,12 +26,17 @@ def load_model_path(root=None, version=None, v_num=None, best=False):
         else:
             return str(Path('lightning_logs', f'version_{v_num}', 'checkpoints'))
 
-    if root==version==v_num=='None':
+    if root=='None':
         return None
 
     root = generate_root()
     if Path(root).is_file():
         return root
+    if Path(root).is_dir():
+        if v_num:
+            root = str(Path(root, f'version_{v_num}'))
+            if Path(root).is_file():
+                return root
     if best:
         files=[i for i in list(Path(root).iterdir()) if i.stem.startswith('best')]
         files.sort(key=sort_by_epoch, reverse=True)
@@ -41,4 +46,4 @@ def load_model_path(root=None, version=None, v_num=None, best=False):
     return res
 
 def load_model_path_by_args(config):
-    return load_model_path(root=config.checkpoint_loaddir, version=config.checkpoint_version, v_num=config.load_v_num)
+    return load_model_path(root=config.checkpoint_loaddir, version=config.checkpoint_version, v_num=config.load_v_num, best=config.best)

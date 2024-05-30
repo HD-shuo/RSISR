@@ -5,6 +5,7 @@ from torchvision.models import inception_v3
 from scipy.linalg import sqrtm
 import numpy as np
 
+
 def calculate_activation_statistics(images, model, batch_size=50, dims=2048):
     model.eval()
     dataloader = torch.utils.data.DataLoader(images, batch_size=batch_size)

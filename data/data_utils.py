@@ -110,8 +110,8 @@ class ValDatasetFromFolder2(Dataset):
 class TestDatasetFromFolder(Dataset):
     def __init__(self, dataset_dir, upscale_factor):
         super(TestDatasetFromFolder, self).__init__()
-        self.lr_path = dataset_dir + '/DIV2K_test_HR/'
-        self.hr_path = dataset_dir + '/DIV2K_valid_HR/'
+        self.lr_path = dataset_dir
+        self.hr_path = dataset_dir
         self.upscale_factor = upscale_factor
         self.lr_filenames = [join(self.lr_path, x) for x in listdir(self.lr_path) if is_image_file(x)]
         self.hr_filenames = [join(self.hr_path, x) for x in listdir(self.hr_path) if is_image_file(x)]
@@ -129,3 +129,21 @@ class TestDatasetFromFolder(Dataset):
 
     def __len__(self):
         return len(self.lr_filenames)
+
+class TestDatasetFromFolder2(Dataset):
+    def __init__(self, dataset_dir,crop_size, upscale_factor):
+        super(TestDatasetFromFolder2, self).__init__()
+        self.upscale_factor = upscale_factor
+        self.image_filenames = [join(dataset_dir, x) for x in listdir(dataset_dir) if is_image_file(x)]
+        self.crop_size = crop_size
+    def __getitem__(self, index):
+        hr_image = Image.open(self.image_filenames[index])
+        lr_scale = Resize(self.crop_size // self.upscale_factor, interpolation=InterpolationMode.BICUBIC)
+        hr_scale = Resize((self.crop_size,self.crop_size), interpolation=InterpolationMode.BICUBIC)
+        # hr_image = hr_scale(hr_image)
+        lr_image = lr_scale(hr_image)
+        hr_restore_img = hr_scale(lr_image)
+        return ToTensor()(lr_image), ToTensor()(hr_restore_img), ToTensor()(hr_image)
+
+    def __len__(self):
+        return len(self.image_filenames)

@@ -64,6 +64,8 @@ class Decoder(nn.Module):
             return:
                 _type_: _description_
         """
+        for param in self.model.parameters():
+            param.requires_grad = False
         latents = self.post_quant(features)
         output = self.model(latents)
         return output

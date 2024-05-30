@@ -3,30 +3,31 @@ data:
  params:
   train_dataset_dir: /share/program/dxs/Database/data/pngimage_train_HR
   val_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
-  test_dataset_dir: /share/program/dxs/Database/data
+  test_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
   crop_size: 256
   upscale_factor: 4
   batch_size: 4
   wrap: bool
 model:
  model_name: upscale_model
- color_range: 255
- lr: 1.0e-04
- loss: l1
+ color_range: 1
+ lr: 8.0e-05
+ loss: mse
  weight_decay: 1e-5
  lr_scheduler: 'step'
  lr_decay_steps: 20
  lr_decay_rate: 0.5
  lr_decay_min_lr: 1e-5
  checkpoint_loaddir: None
- checkpoint_version: None
- load_v_num: None
+ checkpoint_version: 0
+ load_v_num: 1
+ best: True
  image_size: 256
  model_config:
   upsample:
    in_channels: 3
    out_channels: 3
-   attn: 'ch_att'
+   attn: 'sp_att'
    upscale_factor: 4
   encoder:
    model_path: "/share/program/dxs/RSISR/pretrain_weights"

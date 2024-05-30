@@ -2,8 +2,8 @@ import numpy as np
 from scipy.signal import convolve2d
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 import lpips
-import torch
 import torchvision.transforms as transforms
+from torchmetrics.image import PeakSignalNoiseRatio
 
 def compare_rmse(x_true, x_pred):
     """
@@ -30,6 +30,15 @@ def compare_mpsnr(x_true, x_pred, data_range, detail=False):
         return np.mean(total_psnr), total_psnr
     else:
         return np.mean(total_psnr)
+    
+def cal_psnr(x_true, x_pred):
+    metric = PeakSignalNoiseRatio()
+    x_true, x_pred = x_true.astype(np.float32), x_pred.astype(np.float32)
+    pnsr = PeakSignalNoiseRatio(x_pred, x_true)
+    metric.update(x_pred, x_true)
+    # draw pnsr fig
+    fig_, ax_ = metric.plot
+    return pnsr
 
 
 def compare_mssim(x_true, x_pred, data_range, multidimension, detail=False):
@@ -106,7 +115,6 @@ def cacul_lpips(img1, img2):
     # 将图像输入LPIPS网络进行计算
     distance = lpips_net(image1, image2)
     return distance.item()
-
 
 
 def quality_assessment(x_true, x_pred, data_range, multi_dimension=False):

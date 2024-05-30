@@ -82,7 +82,8 @@ class UpsampleModule(nn.Module):
         super().__init__()
         self.upsample = nn.ConvTranspose2d(conf.in_channels, conf.out_channels, kernel_size=4, stride=conf.upscale_factor, padding=0, output_padding=0)
         self.attn = conf.attn
-        self.relu = nn.ReLU()
+        self.bn = nn.BatchNorm2d(conf.out_channels)  
+        self.relu = nn.ReLU(inplace=True)
         if self.attn == 'ch_att':
             self.attention = ChannelAttention(conf.out_channels)
         if self.attn == 'sp_att':
@@ -92,6 +93,7 @@ class UpsampleModule(nn.Module):
 
     def forward(self, x):
         x = self.upsample(x)
+        x = self.bn(x)
         x = self.relu(x)
         x = self.attention(x)
         return x

@@ -1,10 +1,14 @@
 import inspect
 import torch
 import numpy as np
+from PIL import Image
+import os
+import cv2
 import importlib
 from torch import nn
 from torch.nn import functional as F
 import torch.optim.lr_scheduler as lrs
+import torchvision.models as models
 
 import pytorch_lightning as pl
 from model.metrics import tensor_accessment
@@ -31,10 +35,32 @@ class MInterface(pl.LightningModule):
         input_tensor = lr.clone()
         sr_rgb = self(input_tensor)  # 使用模型进行高分辨率重建得到 RGB 图像
         loss = self.loss_function(sr_rgb, hr)  # 计算损失函数
-        self.log('loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
+        lr, hr, _ = batch
+        input_tensor = lr.clone().detach()
+        #input_tensor = torch.tensor(lr)
+        sr_rgb = self(input_tensor)
+        #print(sr_rgb.size())
+        #sr_rgb = self(lr, hr)  # 使用模型进行高分辨率重建得到 RGB 图像
+        if sr_rgb.dtype == torch.bfloat16:
+            sr_rgb = sr_rgb.float()
+        sr_rgb = quantize(sr_rgb, self.hparams.color_range)  # 对重建的图像进行量化处理（可选）
+        mpsnr, mssim, lpips, _, _ = tensor_accessment(
+            x_pred=sr_rgb.cpu().numpy(),
+            x_true=hr.cpu().numpy(),
+            data_range=self.hparams.color_range,
+            multi_dimension=False)
+        #new fid score calculation
+        fid_score = calculate_fid_score(hr.cpu().numpy(), sr_rgb.cpu().numpy(), hr.size(0))
+        self.log("fid_score", fid_score,on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('mpsnr', mpsnr, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('mssim', mssim, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('lpips', lpips, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+
+    def test_step(self, batch, batch_idx):
         lr, hr, _ = batch
         input_tensor = lr.clone().detach()
         #input_tensor = torch.tensor(lr)
@@ -55,26 +81,13 @@ class MInterface(pl.LightningModule):
         self.log('mpsnr', mpsnr, on_step=False, on_epoch=True, prog_bar=True)
         self.log('mssim', mssim, on_step=False, on_epoch=True, prog_bar=True)
         self.log('lpips', lpips, on_step=False, on_epoch=True, prog_bar=True)
-
-    def test_step(self, batch, batch_idx):
-        lr, hr, _ = batch
-        input_tensor = lr.clone().detach()
-        #input_tensor = torch.tensor(lr)
-        sr_rgb = self(input_tensor)
-        #print(sr_rgb.size())
-        #sr_rgb = self(lr, hr)  # 使用模型进行高分辨率重建得到 RGB 图像
-        sr_rgb = quantize(sr_rgb, self.hparams.color_range)  # 对重建的图像进行量化处理（可选）
-        mpsnr, mssim, lpips, _, _ = tensor_accessment(
-            x_pred=sr_rgb.cpu().numpy(),
-            x_true=hr.cpu().numpy(),
-            data_range=self.hparams.color_range,
-            multi_dimension=False)
-        #new fid score calculation
-        fid_score = calculate_fid_score(hr.cpu().numpy(), sr_rgb.cpu().numpy(), hr.size(0))
-        self.log("fid_score", fid_score,on_step=False, on_epoch=True, prog_bar=True)
-        self.log('mpsnr', mpsnr, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('mssim', mssim, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('lpips', lpips, on_step=False, on_epoch=True, prog_bar=True)
+        save_path = "/share/program/dxs/Database/data/pngimage_restore"
+        for i in range(sr_rgb.size(0)):
+            img = sr_rgb[i].cpu().numpy().transpose((1,2,0))
+            img = Image.fromarray((img * 255).astype(np.uint8))
+            filename = f'restore_{i}.png'
+            path = os.path.join(save_path, filename)
+            img.save(path)  
 
     def on_validation_epoch_end(self):
         # Make the Progress Bar leave there
@@ -122,6 +135,8 @@ class MInterface(pl.LightningModule):
             self.loss_function = F.mse_loss
         elif loss == 'l1':
             self.loss_function = F.l1_loss
+        elif loss == 'mix':
+            self.loss_function = mixed_loss
         else:
             raise ValueError("Invalid Loss Type!")
 
@@ -155,3 +170,29 @@ class MInterface(pl.LightningModule):
                 args1[arg] = getattr(self.hparams, arg)
         args1.update(other_args)
         return Model(**args1)
+    
+class VGGFeatures(nn.Module):
+    def __init__(self):
+        super(VGGFeatures, self).__init__()
+        vgg16 = models.vgg16(pretrained=True)
+        self.features = nn.Sequential(*list(vgg16.features.children())[:-1])
+        
+    def forward(self, x):
+        x = self.features(x)
+        return x
+        
+def perceptual_loss(img1, img2):
+    vgg = VGGFeatures().cuda()
+    vgg.eval()
+    
+    img1_feat = vgg(img1)
+    img2_feat = vgg(img2)
+    
+    loss = F.l1_loss(img1_feat, img2_feat)
+    return loss
+
+def mixed_loss(img1, img2):
+    p_loss = perceptual_loss(img1, img2)
+    mse_loss = F.mse_loss(img1, img2)
+    mix_loss = p_loss + mse_loss
+    return mix_loss

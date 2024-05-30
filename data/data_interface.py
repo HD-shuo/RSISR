@@ -3,7 +3,7 @@ import importlib
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader, random_split, Dataset
 import torchvision.transforms as transforms
-from .data_utils import TrainDatasetFromFolder, ValDatasetFromFolder, TestDatasetFromFolder
+from .data_utils import TrainDatasetFromFolder, ValDatasetFromFolder, TestDatasetFromFolder, TestDatasetFromFolder2
 
 class DInterface(pl.LightningDataModule):
 
@@ -27,15 +27,16 @@ class DInterface(pl.LightningDataModule):
             crop_size=self.params.crop_size,
             upscale_factor=self.params.upscale_factor
         )
-        # test_dataset = TestDatasetFromFolder(
-        #     dataset_dir=self.params.test_dataset_dir,
-        #     upscale_factor=self.params.upscale_factor
-        # )
+        test_dataset = TestDatasetFromFolder2(
+            dataset_dir=self.params.test_dataset_dir,
+            crop_size=self.params.crop_size,
+            upscale_factor=self.params.upscale_factor
+        )
 
         self.datasets = {
             "train": train_dataset,
-            "validation": val_dataset
-            #"test": test_dataset
+            "validation": val_dataset,
+            "test": test_dataset
         }
 
     def train_dataloader(self):
