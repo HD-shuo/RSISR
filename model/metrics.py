@@ -101,7 +101,7 @@ def img_qi(img1, img2, block_size=8):
 
 def cacul_lpips(img1, img2):
     # 加载预训练的LPIPS网络
-    lpips_net = lpips.LPIPS(net='alex')
+    lpips_net = lpips.LPIPS(net='vgg')
     # 转换图像为模型可接受的格式
     transform = transforms.ToTensor()
     # 加载并转换图像

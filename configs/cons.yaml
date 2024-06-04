@@ -11,16 +11,17 @@ data:
 model:
  model_name: upscale_model
  color_range: 1
- lr: 8.0e-05
+ lr: 1.0e-04
  loss: mse
- weight_decay: 1e-5
+ weight_decay: 1.0e-5
  lr_scheduler: 'step'
- lr_decay_steps: 20
+ lr_decay_steps: 10
  lr_decay_rate: 0.5
- lr_decay_min_lr: 1e-5
+ lr_T_max: 10
+ min_lr: 2.0e-5
  checkpoint_loaddir: None
  checkpoint_version: 0
- load_v_num: 1
+ load_v_num: 4
  best: True
  image_size: 256
  model_config:
@@ -38,7 +39,7 @@ model:
    model_path: "/share/program/dxs/RSISR/pretrain_weights"
 trainer:
  max_epochs: 100
- devices: 4
+ devices: 1
  precision: 'bf16'
  accelerator: "gpu"
  strategy: 'ddp_find_unused_parameters_true'

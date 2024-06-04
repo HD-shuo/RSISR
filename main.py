@@ -70,6 +70,7 @@ def main():
     else:
         model = MInterface(**conf.model)
         model.load_state_dict(torch.load(load_path), strict=False)
+        print("load the weights from:", load_path)
     # 加载预训练模型
     #pipeline = DiffusionPipeline.from_pretrained("/share/program/dxs/huggingface/stable-diffusion-xl-refiner-0.9", torch_dtype=torch.float16, use_safetensors=True, variant="fp16")
     #pipeline.to("cuda")
@@ -86,7 +87,7 @@ def main():
         trainer.fit(model, data_module)
     elif flag == 'test':
         trainer = Trainer(logger=test_logger, **conf.trainer)
-        trainer.test(model, data_module)
+        trainer.test(model, data_module, ckpt_path=load_path)
     else:
         raise ValueError("please specify the trainer mode")
 

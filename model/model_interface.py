@@ -9,10 +9,12 @@ from torch import nn
 from torch.nn import functional as F
 import torch.optim.lr_scheduler as lrs
 import torchvision.models as models
+from torchvision.models.vgg import VGG16_Weights
 
 import pytorch_lightning as pl
 from model.metrics import tensor_accessment
 from model.utils.utils import quantize
+from model.utils.loss_function import PerceptualLoss, mixed_loss
 from model.fid_score import calculate_fid_score
 
 
@@ -77,10 +79,10 @@ class MInterface(pl.LightningModule):
             multi_dimension=False)
         #new fid score calculation
         fid_score = calculate_fid_score(hr.cpu().numpy(), sr_rgb.cpu().numpy(), hr.size(0))
-        self.log("fid_score", fid_score,on_step=False, on_epoch=True, prog_bar=True)
-        self.log('mpsnr', mpsnr, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('mssim', mssim, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('lpips', lpips, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("fid_score", fid_score,on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('mpsnr', mpsnr, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('mssim', mssim, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('lpips', lpips, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         save_path = "/share/program/dxs/Database/data/pngimage_restore"
         for i in range(sr_rgb.size(0)):
             img = sr_rgb[i].cpu().numpy().transpose((1,2,0))
@@ -114,8 +116,8 @@ class MInterface(pl.LightningModule):
                                        gamma=self.hparams.lr_decay_rate)
             elif self.hparams.lr_scheduler == 'cosine':
                 scheduler = lrs.CosineAnnealingLR(optimizer,
-                                                  T_max=self.hparams.lr_decay_steps,
-                                                  eta_min=self.hparams.lr_decay_min_lr)
+                                                  T_max=self.hparams.lr_T_max,
+                                                  eta_min=self.hparams.min_lr)
             else:
                 raise ValueError('Invalid lr_scheduler type!')
             #return [optimizer], [scheduler]
@@ -131,10 +133,13 @@ class MInterface(pl.LightningModule):
 
     def configure_loss(self):
         loss = self.hparams.loss.lower()
+        perceptual_loss = PerceptualLoss()
         if loss == 'mse':
             self.loss_function = F.mse_loss
         elif loss == 'l1':
             self.loss_function = F.l1_loss
+        elif loss == 'p_loss':
+            self.loss_function = perceptual_loss
         elif loss == 'mix':
             self.loss_function = mixed_loss
         else:
@@ -171,28 +176,28 @@ class MInterface(pl.LightningModule):
         args1.update(other_args)
         return Model(**args1)
     
-class VGGFeatures(nn.Module):
-    def __init__(self):
-        super(VGGFeatures, self).__init__()
-        vgg16 = models.vgg16(pretrained=True)
-        self.features = nn.Sequential(*list(vgg16.features.children())[:-1])
+# class VGGFeatures(nn.Module):
+#     def __init__(self):
+#         super(VGGFeatures, self).__init__()
+#         vgg16 = models.vgg16(pretrained=True)
+#         self.features = nn.Sequential(*list(vgg16.features.children())[:-1])
         
-    def forward(self, x):
-        x = self.features(x)
-        return x
+#     def forward(self, x):
+#         x = self.features(x)
+#         return x
         
-def perceptual_loss(img1, img2):
-    vgg = VGGFeatures().cuda()
-    vgg.eval()
+# def perceptual_loss(img1, img2):
+#     vgg = VGGFeatures().cuda()
+#     vgg.eval()
     
-    img1_feat = vgg(img1)
-    img2_feat = vgg(img2)
+#     img1_feat = vgg(img1)
+#     img2_feat = vgg(img2)
     
-    loss = F.l1_loss(img1_feat, img2_feat)
-    return loss
+#     loss = F.l1_loss(img1_feat, img2_feat)
+#     return loss
 
-def mixed_loss(img1, img2):
-    p_loss = perceptual_loss(img1, img2)
-    mse_loss = F.mse_loss(img1, img2)
-    mix_loss = p_loss + mse_loss
-    return mix_loss
+# def mixed_loss(img1, img2):
+#     p_loss = perceptual_loss(img1, img2)
+#     mse_loss = F.mse_loss(img1, img2)
+#     mix_loss = p_loss + mse_loss
+#     return mix_loss

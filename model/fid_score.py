@@ -1,7 +1,8 @@
 import torch
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as TF
-from torchvision.models import inception_v3
+# from torchvision.models import inception_v3
+from torchvision.models.inception import inception_v3, Inception_V3_Weights
 from scipy.linalg import sqrtm
 import numpy as np
 
@@ -33,7 +34,8 @@ def calculate_activation_statistics(images, model, batch_size=50, dims=2048):
 def calculate_fid_score(real_images: np.array, generated_images, batch_size=50):
     # 调整批次维度为 [batch_size * num_images, channels, height, width]
     # Load Inception-v3 model pretrained on ImageNet
-    inception_model = inception_v3(pretrained=True)
+    # inception_model = inception_v3(pretrained=True)
+    inception_model = inception_v3(weights = Inception_V3_Weights.IMAGENET1K_V1)
     inception_model.cuda()
     
     transform = transforms.Compose([
