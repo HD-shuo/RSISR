@@ -25,16 +25,16 @@ from model import MInterface
 
 def load_callbacks(conf):
     callbacks = []
-    ckpt_path = '/share/program/dxs/RSISR/checkpoint'
+    ckpt_path = '/share/program/dxs/RSISR/checkpoint/v1'
     v_num = conf.model.load_v_num
     if v_num > -1:
         ckpt_path = str(Path(ckpt_path, f'version_{v_num}'))
-    callbacks.append(plc.EarlyStopping(
-        monitor='mpsnr',
-        mode='max',
-        patience=10,
-        min_delta=0.001
-    ))
+    # callbacks.append(plc.EarlyStopping(
+    #     monitor='mpsnr',
+    #     mode='max',
+    #     patience=10,
+    #     min_delta=0.001
+    # ))
 
     callbacks.append(plc.ModelCheckpoint(
         monitor='mpsnr',
@@ -78,8 +78,8 @@ def main():
     callbacks = load_callbacks(conf)
     # 创建logger
     current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    train_logger = TensorBoardLogger(save_dir='log/train_logs', name=f"train_{current_time}_version_{conf.model.load_v_num}")
-    test_logger = TensorBoardLogger(save_dir='log/test_logs', name=f"test_{current_time}_version_{conf.model.load_v_num}")
+    train_logger = TensorBoardLogger(save_dir=f'log/train_logs/{conf.other_params.log_flag}', name=f"train_{current_time}_version_{conf.model.load_v_num}")
+    test_logger = TensorBoardLogger(save_dir=f'log/test_logs/{conf.other_params.log_flag}', name=f"test_{current_time}_version_{conf.model.load_v_num}")
     flag = conf.other_params.trainer_stage
     if flag == 'train':
         trainer = Trainer(callbacks=callbacks, logger=train_logger, **conf.trainer)

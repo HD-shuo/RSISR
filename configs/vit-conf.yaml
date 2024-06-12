@@ -3,24 +3,26 @@ data:
  params:
   train_dataset_dir: /share/program/dxs/Database/data/pngimage_train_HR
   val_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
-  test_dataset_dir: /share/program/dxs/Database/data
+  test_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
   crop_size: 224
   upscale_factor: 4
   batch_size: 4
   wrap: bool
 model:
  model_name: vit_upscale
- color_range: 255
+ color_range: 1
  lr: 1.0e-04
- loss: l1
- weight_decay: 1e-5
+ loss: mse
+ weight_decay: 1.0e-5
  lr_scheduler: 'step'
- lr_decay_steps: 20
+ lr_decay_steps: 10
  lr_decay_rate: 0.5
- lr_decay_min_lr: 1e-5
+ lr_T_max: 10
+ min_lr: 2.0e-5
  checkpoint_loaddir: None
- checkpoint_version: None
- load_v_num: None
+ checkpoint_version: 0
+ load_v_num: 0
+ best: False
  image_size: 256
  model_config:
   img_size: 224
@@ -28,16 +30,22 @@ model:
   upsample:
    in_channels: 3
    out_channels: 3
-   attn: 'ch_att'
+   attn: 'sp_att'
    upscale_factor: 4
   ddpm: 
    T: 1000
    beta_schedule: "linear"
+  decoder:
+   stb:
+    dim:
+    input_resolution:
+    num_heads:
 trainer:
- max_epochs: 200
- gpus: 4
+ max_epochs: 100
+ devices: 4
  precision: 16
- accelerator: "ddp_spawn"
+ accelerator: "gpu"
+ strategy: 'ddp_find_unused_parameters_true'
 callbacks:
  lr_scheduler: step
 other_params:

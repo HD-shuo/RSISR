@@ -19,10 +19,10 @@ model:
  lr_decay_rate: 0.5
  lr_T_max: 10
  min_lr: 2.0e-5
- checkpoint_loaddir: None
+ checkpoint_loaddir: /share/program/dxs/RSISR/checkpoint/v1
  checkpoint_version: 0
- load_v_num: 4
- best: True
+ load_v_num: 6
+ best: false
  image_size: 256
  model_config:
   upsample:
@@ -46,5 +46,6 @@ trainer:
 callbacks:
  lr_scheduler: step
 other_params:
- trainer_stage: 'train'
+ trainer_stage: 'test'
  seed: 23
+ log_flag: 'v1'

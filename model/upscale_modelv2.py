@@ -1,19 +1,17 @@
 from typing import Optional, Tuple, Union, List
 from omegaconf import DictConfig, OmegaConf
-from timm.models.layers import to_2tuple
 from PIL import Image
 import numpy as np
 import cv2
 
 import torch
 import torch.nn as nn
-import torchvision
 from torchvision.transforms import Compose,ToTensor, ToPILImage, Resize
-from torchvision.transforms.functional import InterpolationMode
 
+from model.encoder import Encoder
 from model.ddpm_model import DdpmModel
-from model.swin_transformer_v2 import SwinTransformerBlock
-from model.easr import RIRGroup, MeanShift, Upsampler, default_conv
+from model.decoder import Decoder
+from model.ddpm.gaussian_diffusion import GaussianDiffusion
 from model.ddpm.gaussian_diffusion import get_named_beta_schedule
 
 
@@ -34,7 +32,6 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
     while len(res.shape) < len(broadcast_shape):
         res = res[..., None]
     return res.expand(broadcast_shape)
-
 
 class ChannelAttention(nn.Module):
     """
@@ -102,65 +99,34 @@ class UpsampleModule(nn.Module):
         return x
 
 
-class Decoder(nn.Module):
+class UpsampleModulev2(nn.Module):
     """
-        init img restore decoder    
+        init upsamle module, use convelution transpose and channel attention
     """
     def __init__(self, conf):
         super().__init__()
-        self.config = conf
-        self.n_group = conf.n_group
-        img_size = to_2tuple(conf.img_size)
-        patch_size = to_2tuple(conf.patch_size)
-        patches_resolution = [img_size[0] // patch_size[0], img_size[1] // patch_size[1]]
-        # define head module
-        modules_IFE =[default_conv(conf.hidden_dim, conf.n_feats, kernel_size=3)]
-        modules_head = [
-            default_conv(conf.n_feats, conf.n_feats, kernel_size=3)]
+        self.up_near = nn.UpsamplingNearest2d(scale_factor=conf.upscale_factor)
+        self.ins_norm = nn.InstanceNorm2d(num_features=conf.in_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.attn = conf.attn
+        if self.attn == 'ch_att':
+            self.attention = ChannelAttention(conf.out_channels)
+        if self.attn == 'sp_att':
+            self.attention = SpatialAttention()
+        else:
+            self.attention = nn.Identity()
 
-        # build attn block
-        self.attn_blocks = nn.ModuleList([
-            RIRGroup(conf.n_feats, kernel_size=3, n_resblocks=conf.n_resblocks)
-            for _ in range(conf.n_resgroups)
-        ])
-        # build stb blocks
-        self.stb_blocks = nn.ModuleList()
-        for i_blk in range(conf.n_stb):
-            stb_block = SwinTransformerBlock(
-                dim = int(conf.stb.embed_dim *2 ** i_blk),
-                input_resolution=(patches_resolution[0] // (2 ** i_blk),
-                                  patches_resolution[1] // (2 ** i_blk)),
-                num_heads=conf.stb.num_heads[i_blk],
-                window_size=conf.stb.window_size
-            )
-            self.stb_blocks.append(stb_block)
-        
-        # build decoder tail
-        modules_tail = [
-            Upsampler(conf.upsacle_factor, conf.n_feats, act=False)
-        ]
-        
-        self.add_mean = MeanShift(conf.rgb_range, sign=1)
-        self.IFE = nn.Sequential(*modules_IFE)
-        self.head = nn.Sequential(*modules_head)
-        self.tail = nn.Sequential(*modules_tail)
-    
     def forward(self, x):
-        IFE_x = self.IFE(x)
-        x = self.head(IFE_x)
-        for _ in range(self.n_group):
-            for anblk in self.attn_blocks:
-                x = anblk(x)
-            for blk in self.stb_blocks:
-                x = blk(x)
-        x += IFE_x
-        x = self.tail(x)
-        x = self.add_mean(x)
+        x = self.up_near(x)
+        # feature_map_img = ToPILImage()(x[0].detach().cpu().squeeze())  
+        # feature_map_img.save('feature_map.png')  
+        x = self.ins_norm(x)
+        # x = self.relu(x) 
+        # x = self.attention(x)
         return x
 
 
-
-class VitUpscale(nn.Module):
+class UpscaleModelv2(nn.Module):
     """
         init upscale model     
     """
@@ -169,11 +135,10 @@ class VitUpscale(nn.Module):
         self.configs = model_config
         # 初始化time_embedding
         # 初始化模型
-        self.vit = torchvision.models.vit_b_16(pretrained=True)
+        self.encoder = Encoder(model_config.encoder)
         self.ddpm = DdpmModel()
-        self.upsample = UpsampleModule(model_config.upsample)
-        self.proj = nn.Linear(1000, 3*model_config.img_size * model_config.img_size)
         self.decoder = Decoder(model_config.decoder)
+        self.upsample = UpsampleModulev2(model_config.upsample)
 
         # noise and ddpm caculation schedule
         self.T = model_config.ddpm.T
@@ -215,46 +180,43 @@ class VitUpscale(nn.Module):
         )
 
     def forward(self, x):
-        conf = self.configs
         # noise scheduel
         t = torch.randint(self.T, size=(x.shape[0], ), device=x.device)
+        # noise = torch.randn_like(x)
         x = self.upsample(x)
-        # save feature
-        # feature_map_img = ToPILImage()(x[0].detach().cpu().squeeze())  
-        # feature_map_img.save('feature_map.png')  
-
-        x = self.vit(x)
-        x = self.proj(x)
-        bs = x.size(0)
-        x = x.view(bs, conf.ch, conf.img_size, conf.img_size)
-        noise = torch.randn_like(x)
+        x = self.encoder(x)
+        
+        posterior = x.latent_dist
+        z = posterior.mode()
+        noise = torch.randn_like(z)
         # ddpm
-        xt = self.q_sample(x, t, noise)
-        x = self.ddpm(xt, t)
-        x = self.decoder(x) 
+        xt = self.q_sample(z, t, noise)
+        x = self.ddpm(xt, t) 
+        x = self.decoder(x)
         return x
-
+    
 def train_lr_transform(crop_size, upscale_factor, images):
     transform = Compose([
         ToPILImage(),
-        Resize(crop_size // upscale_factor, interpolation=InterpolationMode.BICUBIC),
+        Resize(crop_size // upscale_factor, interpolation=Image.BICUBIC),
         ToTensor()
     ])
     for i in range(len(images)):
-        img = cv2.resize(images[i], (crop_size, crop_size))
+        img = cv2.resize(images[i], (256, 256))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = transform(img)
-        images[i] = img.clone().detach() 
+        images[i] = torch.tensor(img)
     images = torch.stack(images)
     return images
 
 
 if __name__ == "__main__":
     # load conf
-    confdir = "/share/program/dxs/RSISR/configs/model_2.yaml"
+    confdir = "/share/program/dxs/RSISR/configs/model.yaml"
     conf = OmegaConf.load(confdir)
     # load model
-    upscale_model = VitUpscale(conf)
+    encoder = Encoder(conf.encoder)
+    upscale_model = UpscaleModelv2(conf)
     # test
     # time embedding
     t = torch.randint(1000, (2, ))
@@ -269,6 +231,6 @@ if __name__ == "__main__":
     test_img2 = np.array(test_img2)
     test_images.append(test_img2)
     test_images.append(test_img2)
-    test_tensors = train_lr_transform(224, 4, test_images)
+    test_tensors = train_lr_transform(256, 4, test_images)
     output_features = upscale_model(test_tensors)
     print(output_features.shape)
