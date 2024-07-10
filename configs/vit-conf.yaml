@@ -4,9 +4,10 @@ data:
   train_dataset_dir: /share/program/dxs/Database/data/pngimage_train_HR
   val_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
   test_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
+  original_size: 256
   crop_size: 224
   upscale_factor: 4
-  batch_size: 4
+  batch_size: 2
   wrap: bool
 model:
  model_name: vit_upscale
@@ -22,24 +23,37 @@ model:
  checkpoint_loaddir: None
  checkpoint_version: 0
  load_v_num: 0
- best: False
+ best: True
  image_size: 256
  model_config:
-  img_size: 224
+  img_size: 256
   ch: 3
   upsample:
    in_channels: 3
    out_channels: 3
-   attn: 'sp_att'
+   attn: 'ch_att'
    upscale_factor: 4
   ddpm: 
    T: 1000
    beta_schedule: "linear"
   decoder:
+   img_size: 256
+   n_colors: 3
+   patch_size: 1
+   n_group: 2
+   hidden_dim: 3
+   n_feats: 16
+   n_resblocks: 4
+   n_resgroups: 2
+   n_stb: 2
    stb:
-    dim:
-    input_resolution:
-    num_heads:
+    embed_dim: 16
+    input_resolution: 256
+    num_heads: [2,4,8,16]
+    window_size: 4
+    depths: [2,2,2,2]
+   upsacle_factor: 4
+   rgb_range: 1
 trainer:
  max_epochs: 100
  devices: 4
@@ -51,3 +65,5 @@ callbacks:
 other_params:
  trainer_stage: 'train'
  seed: 23
+ log_flag: 'v3'
+ model_n: 'vit_v3'

@@ -40,12 +40,13 @@ model:
 trainer:
  max_epochs: 100
  devices: 1
- precision: 'bf16'
+ precision: 'bf16-mixed'
  accelerator: "gpu"
  strategy: 'ddp_find_unused_parameters_true'
 callbacks:
  lr_scheduler: step
 other_params:
- trainer_stage: 'test'
+ trainer_stage: 'train'
  seed: 23
  log_flag: 'v1'
+ model_n: 'base'

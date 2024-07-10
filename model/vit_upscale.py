@@ -4,15 +4,17 @@ from timm.models.layers import to_2tuple
 from PIL import Image
 import numpy as np
 import cv2
+import math
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision
 from torchvision.transforms import Compose,ToTensor, ToPILImage, Resize
 from torchvision.transforms.functional import InterpolationMode
 
 from model.ddpm_model import DdpmModel
-from model.swin_transformer_v2 import SwinTransformerBlock
+from model.swin_transformer_v2 import BasicLayer, PatchEmbed
 from model.easr import RIRGroup, MeanShift, Upsampler, default_conv
 from model.ddpm.gaussian_diffusion import get_named_beta_schedule
 
@@ -100,6 +102,75 @@ class UpsampleModule(nn.Module):
         x = self.relu(x)
         x = self.attention(x)
         return x
+    
+
+class UpsampleModulev2(nn.Module):
+    """
+        init upsamle module, use convelution transpose and channel attention     
+    """
+    def __init__(self, scale, n_color, bn=False, act=False, bias=True):
+        super(Upsampler, self).__init__()
+        m = []
+        if (scale & (scale - 1)) == 0:    # Is scale = 2^n?
+            for _ in range(int(math.log(scale, 2))):
+                m.append(default_conv(n_color, 4 * n_color, 3, bias))
+                m.append(nn.PixelShuffle(2))
+                if bn:
+                    m.append(nn.BatchNorm2d(n_color))
+                if act == 'relu':
+                    m.append(nn.ReLU(True))
+                elif act == 'prelu':
+                    m.append(nn.PReLU(n_color))
+
+        elif scale == 3:
+            m.append(default_conv(n_color, 9 * n_color, 3, bias))
+            m.append(nn.PixelShuffle(3))
+            if bn:
+                m.append(nn.BatchNorm2d(n_color))
+            if act == 'relu':
+                m.append(nn.ReLU(True))
+            elif act == 'prelu':
+                m.append(nn.PReLU(n_color))
+        else:
+            raise NotImplementedError
+        self.body = nn.Sequential(*m)
+
+    def forward(self, x):
+        return self.body(x)
+
+
+class STB_layer(nn.Module):
+    def __init__(self, img_size=256, patch_size=4, in_chans=3,
+                 embed_dim=64, depths=[2, 2, 6, 2], num_heads=[2, 4, 8, 16],
+                 window_size=8, mlp_ratio=4., qkv_bias=True,
+                 drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
+                 norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
+                 use_checkpoint=False, pretrained_window_sizes=[0, 0, 0, 0], **kwargs):
+        super().__init__()
+        self.num_layers = len(depths)
+        self.embed_dim = embed_dim
+        self.patch_norm = patch_norm
+        # split image into non-overlapping patches
+        self.patch_embed = PatchEmbed(
+            img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim,
+            norm_layer=norm_layer if self.patch_norm else None)
+        # build layers
+        self.layers = nn.ModuleList()
+        for i_layer in range(self.num_layers):
+            layer = BasicLayer(dim=embed_dim,
+                               input_resolution=(img_size,img_size),
+                               depth=depths[i_layer],
+                               num_heads=num_heads[i_layer],
+                               window_size=window_size)
+            self.layers.append(layer)
+        self.norm = norm_layer(embed_dim)
+    
+    def forward(self, x):
+        x = self.patch_embed(x)
+        for layer in self.layers:
+            x = layer(x)
+        x = self.norm(x)
+        return x
 
 
 class Decoder(nn.Module):
@@ -110,9 +181,8 @@ class Decoder(nn.Module):
         super().__init__()
         self.config = conf
         self.n_group = conf.n_group
-        img_size = to_2tuple(conf.img_size)
-        patch_size = to_2tuple(conf.patch_size)
-        patches_resolution = [img_size[0] // patch_size[0], img_size[1] // patch_size[1]]
+        self.img_size = to_2tuple(conf.img_size)
+        
         # define head module
         modules_IFE =[default_conv(conf.hidden_dim, conf.n_feats, kernel_size=3)]
         modules_head = [
@@ -123,21 +193,24 @@ class Decoder(nn.Module):
             RIRGroup(conf.n_feats, kernel_size=3, n_resblocks=conf.n_resblocks)
             for _ in range(conf.n_resgroups)
         ])
-        # build stb blocks
-        self.stb_blocks = nn.ModuleList()
-        for i_blk in range(conf.n_stb):
-            stb_block = SwinTransformerBlock(
-                dim = int(conf.stb.embed_dim *2 ** i_blk),
-                input_resolution=(patches_resolution[0] // (2 ** i_blk),
-                                  patches_resolution[1] // (2 ** i_blk)),
-                num_heads=conf.stb.num_heads[i_blk],
-                window_size=conf.stb.window_size
-            )
-            self.stb_blocks.append(stb_block)
+        
+        # build stb layer
+        self.stb_layer = STB_layer(
+            img_size=conf.img_size,
+            in_chans=conf.n_feats,
+            embed_dim = conf.stb.embed_dim,
+            depths=conf.stb.depths,
+            num_heads=conf.stb.num_heads,
+            window_size=conf.stb.window_size
+        )
         
         # build decoder tail
+        # modules_tail = [
+        #     Upsampler(conf.upsacle_factor, conf.n_feats, act=False),
+        #     default_conv(conf.n_feats, conf.n_colors, kernel_size=3)
+        # ]
         modules_tail = [
-            Upsampler(conf.upsacle_factor, conf.n_feats, act=False)
+            default_conv(conf.n_feats, conf.n_colors, kernel_size=3)
         ]
         
         self.add_mean = MeanShift(conf.rgb_range, sign=1)
@@ -149,10 +222,12 @@ class Decoder(nn.Module):
         IFE_x = self.IFE(x)
         x = self.head(IFE_x)
         for _ in range(self.n_group):
+            x = self.stb_layer(x)
+            B, _, C = x.shape
+            H, W = self.img_size
+            x = x.view(B, C, H, W)
             for anblk in self.attn_blocks:
                 x = anblk(x)
-            for blk in self.stb_blocks:
-                x = blk(x)
         x += IFE_x
         x = self.tail(x)
         x = self.add_mean(x)
@@ -174,6 +249,7 @@ class VitUpscale(nn.Module):
         self.upsample = UpsampleModule(model_config.upsample)
         self.proj = nn.Linear(1000, 3*model_config.img_size * model_config.img_size)
         self.decoder = Decoder(model_config.decoder)
+        self.bn = nn.BatchNorm2d(model_config.upsample.out_channels)  
 
         # noise and ddpm caculation schedule
         self.T = model_config.ddpm.T
@@ -219,6 +295,8 @@ class VitUpscale(nn.Module):
         # noise scheduel
         t = torch.randint(self.T, size=(x.shape[0], ), device=x.device)
         x = self.upsample(x)
+        x_up = F.interpolate(x, size=conf.img_size, mode='bicubic', align_corners=False)
+        x_up = self.bn(x_up)
         # save feature
         # feature_map_img = ToPILImage()(x[0].detach().cpu().squeeze())  
         # feature_map_img.save('feature_map.png')  
@@ -231,7 +309,9 @@ class VitUpscale(nn.Module):
         # ddpm
         xt = self.q_sample(x, t, noise)
         x = self.ddpm(xt, t)
-        x = self.decoder(x) 
+        x_res = x_up - x
+        x += x_res
+        x = self.decoder(x)
         return x
 
 def train_lr_transform(crop_size, upscale_factor, images):
@@ -264,10 +344,8 @@ if __name__ == "__main__":
     test_img1 = Image.open(test_img1).convert("RGB")
     test_img1 = np.array(test_img1)
     test_images.append(test_img1)
-    test_images.append(test_img1)
     test_img2 = Image.open(test_img2).convert("RGB")
     test_img2 = np.array(test_img2)
-    test_images.append(test_img2)
     test_images.append(test_img2)
     test_tensors = train_lr_transform(224, 4, test_images)
     output_features = upscale_model(test_tensors)

@@ -19,6 +19,7 @@ class DInterface(pl.LightningDataModule):
     def setup(self, stage=None):
         train_dataset = TrainDatasetFromFolder(
             dataset_dir=self.params.train_dataset_dir,
+            original_size=self.params.original_size,
             crop_size=self.params.crop_size,
             upscale_factor=self.params.upscale_factor
         )

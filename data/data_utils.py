@@ -16,9 +16,9 @@ def calculate_valid_crop_size(crop_size, upscale_factor):
 
 # 将输入的高分辨率图像调整到指定的大小（crop_size x crop_size），使用BICUBIC插值进行插值，以保留图像的质量和细节
 # 将处理后的图像转换为PyTorch张量的格式
-def train_hr_transform(crop_size):
+def train_hr_transform(original_size):
     return Compose([
-        Resize((crop_size,crop_size), interpolation=InterpolationMode.BICUBIC),
+        Resize((original_size,original_size), interpolation=InterpolationMode.BICUBIC),
         #RandomCrop(crop_size),
         ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -53,11 +53,11 @@ def display_transform():
 
 
 class TrainDatasetFromFolder(Dataset):
-    def __init__(self, dataset_dir, crop_size, upscale_factor):
+    def __init__(self, dataset_dir, original_size, crop_size, upscale_factor):
         super(TrainDatasetFromFolder, self).__init__()
         self.image_filenames = [join(dataset_dir, x) for x in listdir(dataset_dir) if is_image_file(x)]
         crop_size = calculate_valid_crop_size(crop_size, upscale_factor)
-        self.hr_transform = train_hr_transform(crop_size)
+        self.hr_transform = train_hr_transform(original_size)
         self.lr_transform = train_lr_transform(crop_size, upscale_factor)
 
     def __getitem__(self, index):
@@ -81,10 +81,10 @@ class ValDatasetFromFolder(Dataset):
         #crop_size = calculate_valid_crop_size(min(w, h), self.upscale_factor)
         lr_scale = Resize(self.crop_size // self.upscale_factor, interpolation=InterpolationMode.BICUBIC)
         hr_scale = Resize((self.crop_size,self.crop_size), interpolation=InterpolationMode.BICUBIC)
-        hr_image = hr_scale(hr_image)
+        # hr_image = hr_scale(hr_image)
         lr_image = lr_scale(hr_image)
         hr_restore_img = hr_scale(lr_image)
-        return ToTensor()(lr_image), ToTensor()(hr_restore_img), ToTensor()(hr_image)
+        return ToTensor()(lr_image),  ToTensor()(hr_image), ToTensor()(hr_restore_img)
 
     def __len__(self):
         return len(self.image_filenames)
@@ -140,10 +140,9 @@ class TestDatasetFromFolder2(Dataset):
         hr_image = Image.open(self.image_filenames[index])
         lr_scale = Resize(self.crop_size // self.upscale_factor, interpolation=InterpolationMode.BICUBIC)
         hr_scale = Resize((self.crop_size,self.crop_size), interpolation=InterpolationMode.BICUBIC)
-        # hr_image = hr_scale(hr_image)
+        hr_image = hr_scale(hr_image)
         lr_image = lr_scale(hr_image)
         hr_restore_img = hr_scale(lr_image)
-        return ToTensor()(lr_image), ToTensor()(hr_restore_img), ToTensor()(hr_image)
-
+        return ToTensor()(lr_image), ToTensor()(hr_image), ToTensor()(hr_restore_img)
     def __len__(self):
         return len(self.image_filenames)

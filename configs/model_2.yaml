@@ -8,19 +8,20 @@ ddpm:
  beta_schedule: "linear"
 decoder:
  img_size: 256
- patch_size: 4
+ n_colors: 3
+ patch_size: 1
  n_group: 4
  hidden_dim: 3
  n_feats: 64
  n_resblocks: 16
- n_resgroups: 8
+ n_resgroups: 4
  n_stb: 4
  stb:
   embed_dim: 64
   input_resolution: 256
   num_heads: [2,4,8,16]
   window_size: 8
- depth: [2,2,6,2]
+  depths: [2,2,6,2]
  upsacle_factor: 4
  rgb_range: 1
 img_size: 256
