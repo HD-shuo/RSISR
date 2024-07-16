@@ -25,7 +25,7 @@ from model import MInterface
 
 def load_callbacks(conf):
     callbacks = []
-    ckpt_path = '/share/program/dxs/RSISR/checkpoint/vit_ckpt/v3'
+    ckpt_path = '/share/program/dxs/RSISR/checkpoint/vit_ckpt/v5/version_3'
     v_num = conf.model.load_v_num
     if v_num > -1:
         ckpt_path = str(Path(ckpt_path, f'version_{v_num}'))

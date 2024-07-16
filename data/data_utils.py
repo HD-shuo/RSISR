@@ -2,13 +2,17 @@ from os import listdir
 from os.path import join
 
 from PIL import Image
+import torch
 from torch.utils.data.dataset import Dataset
-from torchvision.transforms import Compose, RandomCrop, ToTensor, ToPILImage, CenterCrop, Resize, transforms
+from torchvision.transforms import Compose, RandomCrop, ToTensor, ToPILImage, CenterCrop, Resize, transforms, RandomHorizontalFlip, RandomVerticalFlip, RandomRotation
 from torchvision.transforms.functional import InterpolationMode
 
 
 def is_image_file(filename):
     return any(filename.endswith(extension) for extension in ['.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG'])
+
+def is_type_image_file(filename, type_name):
+    return filename.startswith(type_name) and any(filename.endswith(extension) for extension in ['.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG'])
 
 
 def calculate_valid_crop_size(crop_size, upscale_factor):
@@ -131,18 +135,81 @@ class TestDatasetFromFolder(Dataset):
         return len(self.lr_filenames)
 
 class TestDatasetFromFolder2(Dataset):
-    def __init__(self, dataset_dir,crop_size, upscale_factor):
+    def __init__(self, dataset_dir,crop_size, original_size, upscale_factor):
         super(TestDatasetFromFolder2, self).__init__()
         self.upscale_factor = upscale_factor
         self.image_filenames = [join(dataset_dir, x) for x in listdir(dataset_dir) if is_image_file(x)]
         self.crop_size = crop_size
+        self.original_size = original_size
     def __getitem__(self, index):
         hr_image = Image.open(self.image_filenames[index])
         lr_scale = Resize(self.crop_size // self.upscale_factor, interpolation=InterpolationMode.BICUBIC)
-        hr_scale = Resize((self.crop_size,self.crop_size), interpolation=InterpolationMode.BICUBIC)
+        hr_scale = Resize((self.original_size,self.original_size), interpolation=InterpolationMode.BICUBIC)
         hr_image = hr_scale(hr_image)
         lr_image = lr_scale(hr_image)
         hr_restore_img = hr_scale(lr_image)
         return ToTensor()(lr_image), ToTensor()(hr_image), ToTensor()(hr_restore_img)
+    def __len__(self):
+        return len(self.image_filenames)
+    
+
+class TestDatasetFromFolderinType1(Dataset):
+    def __init__(self, dataset_dir,crop_size, original_size, upscale_factor, type_name):
+        super(TestDatasetFromFolder2, self).__init__()
+        self.upscale_factor = upscale_factor
+        self.image_filenames = [join(dataset_dir, x) for x in listdir(dataset_dir) if is_type_image_file(x, type_name)]
+        self.crop_size = crop_size
+        self.original_size = original_size
+    def __getitem__(self, index):
+        hr_image = Image.open(self.image_filenames[index])
+        lr_scale = Resize(self.crop_size // self.upscale_factor, interpolation=InterpolationMode.BICUBIC)
+        hr_scale = Resize((self.original_size,self.original_size), interpolation=InterpolationMode.BICUBIC)
+        hr_image = hr_scale(hr_image)
+        lr_image = lr_scale(hr_image)
+        hr_restore_img = hr_scale(lr_image)
+        return ToTensor()(lr_image), ToTensor()(hr_image), ToTensor()(hr_restore_img)
+    def __len__(self):
+        return len(self.image_filenames)
+    
+
+class TestDatasetFromFolderinType(Dataset):
+    def __init__(self, dataset_dir, crop_size, original_size, upscale_factor, type_name, n_augmentations, augment=False, inference_mode=False):
+        super().__init__()
+        self.upscale_factor = upscale_factor
+        self.image_filenames = [join(dataset_dir, x) for x in listdir(dataset_dir) if is_type_image_file(x, type_name)]
+        self.crop_size = crop_size
+        self.original_size = original_size
+        self.augment = augment
+        self.inference_mode = inference_mode
+        self.n_augmentations = n_augmentations
+        # 定义扩增变换
+        if augment:
+            self.augment_transform = Compose([
+                RandomHorizontalFlip(),
+                RandomVerticalFlip(),
+                RandomRotation(degrees=90)
+            ])
+
+    def __getitem__(self, index):
+        hr_image_path = self.image_filenames[index]
+        hr_image = Image.open(hr_image_path)
+        hr_image = Image.open(self.image_filenames[index])
+        lr_scale = Resize(self.crop_size // self.upscale_factor, interpolation=InterpolationMode.BICUBIC)
+        hr_scale = Resize((self.original_size,self.original_size), interpolation=InterpolationMode.BICUBIC)
+
+        if self.inference_mode:
+            augmented_hr_images = [self.augment_transform(hr_image) for _ in range(self.n_augmentations)]  # N_AUGMENTATIONS为扩增次数
+            augmented_lr_images = [lr_scale(aug_hr_img) for aug_hr_img in augmented_hr_images]
+            hr_images = torch.stack(augmented_hr_images)
+            lr_images = torch.stack(augmented_lr_images)
+        else:
+            hr_images = hr_image.unsqueeze(0)
+            lr_scale = Resize(self.crop_size // self.upscale_factor, interpolation=InterpolationMode.BICUBIC)
+            lr_images = lr_scale(hr_images).unsqueeze(0)
+
+        hr_restore_imgs = hr_scale(lr_images)
+        # 返回处理后的图像
+        return ToTensor()(lr_images), ToTensor()(hr_images), ToTensor()(hr_restore_imgs)
+
     def __len__(self):
         return len(self.image_filenames)

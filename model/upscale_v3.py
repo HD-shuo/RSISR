@@ -235,7 +235,7 @@ class Decoder(nn.Module):
 
 
 
-class VitUpscale(nn.Module):
+class UpscaleV3(nn.Module):
     """
         init upscale model     
     """
@@ -244,12 +244,11 @@ class VitUpscale(nn.Module):
         self.configs = model_config
         # 初始化time_embedding
         # 初始化模型
-        self.vit = torchvision.models.vit_b_16(pretrained=True)
         self.ddpm = DdpmModel()
         self.upsample = UpsampleModule(model_config.upsample)
-        self.proj = nn.Linear(1000, 3*model_config.img_size * model_config.img_size)
+        # self.proj = nn.Linear(1000, 3*model_config.img_size * model_config.img_size)
         self.decoder = Decoder(model_config.decoder)
-        # self.bn = nn.BatchNorm2d(model_config.upsample.out_channels)  
+        self.bn = nn.BatchNorm2d(model_config.upsample.out_channels)  
 
         # noise and ddpm caculation schedule
         self.T = model_config.ddpm.T
@@ -295,22 +294,21 @@ class VitUpscale(nn.Module):
         # noise scheduel
         t = torch.randint(self.T, size=(x.shape[0], ), device=x.device)
         x = self.upsample(x)
-        # x_up = F.interpolate(x, size=conf.img_size, mode='bicubic', align_corners=False)
-        # x_up = self.bn(x_up)
+        x_up = F.interpolate(x, size=conf.img_size, mode='bicubic', align_corners=False)
+        x_up = self.bn(x_up)
         # save feature
         # feature_map_img = ToPILImage()(x[0].detach().cpu().squeeze())  
         # feature_map_img.save('feature_map.png')  
 
-        x = self.vit(x)
-        x = self.proj(x)
-        bs = x.size(0)
-        x = x.view(bs, conf.ch, conf.img_size, conf.img_size)
+        # x = self.proj(x)
+        # bs = x.size(0)
+        # x = x.view(bs, conf.ch, conf.img_size, conf.img_size)
         noise = torch.randn_like(x)
         # ddpm
         xt = self.q_sample(x, t, noise)
         x = self.ddpm(xt, t)
-        # x_res = x_up - x
-        # x += x_res
+        x_res = x_up - x
+        x += x_res
         x = self.decoder(x)
         return x
 
@@ -334,7 +332,7 @@ if __name__ == "__main__":
     confdir = "/share/program/dxs/RSISR/configs/model_2.yaml"
     conf = OmegaConf.load(confdir)
     # load model
-    upscale_model = VitUpscale(conf)
+    #upscale_model = VitUpscale(conf)
     # test
     # time embedding
     t = torch.randint(1000, (2, ))

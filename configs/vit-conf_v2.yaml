@@ -5,19 +5,14 @@ data:
   val_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
   test_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
   original_size: 256
-  crop_size: 256
+  crop_size: 224
   upscale_factor: 4
-  batch_size: 4
+  batch_size: 2
   wrap: bool
-  # 按类推理相关参数，含数据扩增
-  type_name: agricultural
-  n_augmentations: 3
-  augment: False
-  inference_mode: False
 model:
- model_name: upscale_v3
+ model_name: vit_upscalev2
  color_range: 1
- lr: 5.0e-05
+ lr: 1.0e-04
  loss: mse
  weight_decay: 1.0e-5
  lr_scheduler: 'step'
@@ -32,12 +27,8 @@ model:
  image_size: 256
  model_config:
   img_size: 256
+  crop_size: 224
   ch: 3
-  upsample:
-   in_channels: 3
-   out_channels: 3
-   attn: 'ch_att'
-   upscale_factor: 4
   ddpm: 
    T: 1000
    beta_schedule: "linear"
@@ -45,12 +36,12 @@ model:
    img_size: 256
    n_colors: 3
    patch_size: 1
-   n_group: 2
+   n_group: 3
    hidden_dim: 3
    n_feats: 16
    n_resblocks: 4
    n_resgroups: 2
-   n_stb: 2
+   n_stb: 3
    stb:
     embed_dim: 16
     input_resolution: 256
@@ -60,7 +51,7 @@ model:
    upsacle_factor: 4
    rgb_range: 1
 trainer:
- max_epochs: 50
+ max_epochs: 100
  devices: 4
  precision: 16
  accelerator: "gpu"
@@ -70,5 +61,5 @@ callbacks:
 other_params:
  trainer_stage: 'train'
  seed: 23
- log_flag: 'v3'
- model_n: 'vit_v5'
+ log_flag: 'v0'
+ model_n: 'vit_v4'

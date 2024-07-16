@@ -77,31 +77,6 @@ class SpatialAttention(nn.Module):
         attention = self.conv(pool)
         attention = self.sigmoid(attention)
         return x * attention
-
-
-class UpsampleModule(nn.Module):
-    """
-        init upsamle module, use convelution transpose and channel attention     
-    """
-    def __init__(self, conf):
-        super().__init__()
-        self.upsample = nn.ConvTranspose2d(conf.in_channels, conf.out_channels, kernel_size=4, stride=conf.upscale_factor, padding=0, output_padding=0)
-        self.attn = conf.attn
-        self.bn = nn.BatchNorm2d(conf.out_channels)  
-        self.relu = nn.ReLU(inplace=True)
-        if self.attn == 'ch_att':
-            self.attention = ChannelAttention(conf.out_channels)
-        if self.attn == 'sp_att':
-            self.attention = SpatialAttention()
-        else:
-            self.attention = nn.Identity()
-
-    def forward(self, x):
-        x = self.upsample(x)
-        x = self.bn(x)
-        x = self.relu(x)
-        x = self.attention(x)
-        return x
     
 
 class UpsampleModulev2(nn.Module):
@@ -235,7 +210,7 @@ class Decoder(nn.Module):
 
 
 
-class VitUpscale(nn.Module):
+class VitUpscalev2(nn.Module):
     """
         init upscale model     
     """
@@ -246,10 +221,8 @@ class VitUpscale(nn.Module):
         # 初始化模型
         self.vit = torchvision.models.vit_b_16(pretrained=True)
         self.ddpm = DdpmModel()
-        self.upsample = UpsampleModule(model_config.upsample)
         self.proj = nn.Linear(1000, 3*model_config.img_size * model_config.img_size)
         self.decoder = Decoder(model_config.decoder)
-        # self.bn = nn.BatchNorm2d(model_config.upsample.out_channels)  
 
         # noise and ddpm caculation schedule
         self.T = model_config.ddpm.T
@@ -294,13 +267,7 @@ class VitUpscale(nn.Module):
         conf = self.configs
         # noise scheduel
         t = torch.randint(self.T, size=(x.shape[0], ), device=x.device)
-        x = self.upsample(x)
-        # x_up = F.interpolate(x, size=conf.img_size, mode='bicubic', align_corners=False)
-        # x_up = self.bn(x_up)
-        # save feature
-        # feature_map_img = ToPILImage()(x[0].detach().cpu().squeeze())  
-        # feature_map_img.save('feature_map.png')  
-
+        x = F.interpolate(x, size=conf.crop_size, mode='bicubic', align_corners=False)
         x = self.vit(x)
         x = self.proj(x)
         bs = x.size(0)
@@ -309,8 +276,6 @@ class VitUpscale(nn.Module):
         # ddpm
         xt = self.q_sample(x, t, noise)
         x = self.ddpm(xt, t)
-        # x_res = x_up - x
-        # x += x_res
         x = self.decoder(x)
         return x
 
