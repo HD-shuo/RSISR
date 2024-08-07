@@ -4,9 +4,10 @@ data:
   train_dataset_dir: /share/program/dxs/Database/data/pngimage_train_HR
   val_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
   test_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
+  original_size: 256
   crop_size: 256
   upscale_factor: 4
-  batch_size: 4
+  batch_size: 2
   wrap: bool
 model:
  model_name: upscale_model
@@ -19,7 +20,7 @@ model:
  lr_decay_rate: 0.5
  lr_T_max: 10
  min_lr: 2.0e-5
- checkpoint_loaddir: /share/program/dxs/RSISR/checkpoint/v1
+ checkpoint_loaddir: None
  checkpoint_version: 0
  load_v_num: 6
  best: false
@@ -39,7 +40,7 @@ model:
    model_path: "/share/program/dxs/RSISR/pretrain_weights"
 trainer:
  max_epochs: 100
- devices: 1
+ devices: 4
  precision: 'bf16-mixed'
  accelerator: "gpu"
  strategy: 'ddp_find_unused_parameters_true'
@@ -48,5 +49,5 @@ callbacks:
 other_params:
  trainer_stage: 'train'
  seed: 23
- log_flag: 'v1'
+ log_flag: 'v3'
  model_n: 'base'

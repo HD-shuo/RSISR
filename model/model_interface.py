@@ -35,16 +35,24 @@ class MInterface(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         lr, hr  = batch
         input_tensor = lr.clone()
-        sr_rgb = self(input_tensor)  # 使用模型进行高分辨率重建得到 RGB 图像
-        loss = self.loss_function(sr_rgb, hr)  # 计算损失函数
-        self.log('loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        results = self(input_tensor)  # 使用模型进行高分辨率重建得到 RGB 图像
+        # sr_rgb, ddpm_loss = self(input_tensor)  # 使用模型进行高分辨率重建得到 RGB 图像
+        if len(results) == 2:
+            sr_rgb, ddpm_loss = results
+            loss = self.loss_function(sr_rgb, hr) + 0.5*(ddpm_loss)  # 计算损失函数
+            self.log('ddpm_loss', ddpm_loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log('loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        else:
+            sr_rgb = results
+            loss = self.loss_function(sr_rgb, hr)
+            self.log('loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         lr, hr, _ = batch
         input_tensor = lr.clone().detach()
         #input_tensor = torch.tensor(lr)
-        sr_rgb = self(input_tensor)
+        sr_rgb, _ = self(input_tensor)
         #print(sr_rgb.size())
         #sr_rgb = self(lr, hr)  # 使用模型进行高分辨率重建得到 RGB 图像
         if sr_rgb.dtype == torch.bfloat16:
@@ -56,8 +64,8 @@ class MInterface(pl.LightningModule):
             data_range=self.hparams.color_range,
             multi_dimension=False)
         #new fid score calculation
-        fid_score = calculate_fid_score(hr.cpu().numpy(), sr_rgb.cpu().numpy(), hr.size(0))
-        self.log("fid_score", fid_score,on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        #fid_score = calculate_fid_score(hr.cpu().numpy(), sr_rgb.cpu().numpy(), hr.size(0))
+        #self.log("fid_score", fid_score,on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log('mpsnr', mpsnr, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log('mssim', mssim, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log('lpips', lpips, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)

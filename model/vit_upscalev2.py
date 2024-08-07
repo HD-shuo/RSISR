@@ -12,11 +12,22 @@ import torch.nn.functional as F
 import torchvision
 from torchvision.transforms import Compose,ToTensor, ToPILImage, Resize
 from torchvision.transforms.functional import InterpolationMode
+from torchvision.models import ViT_B_16_Weights
 
 from model.ddpm_model import DdpmModel
 from model.swin_transformer_v2 import BasicLayer, PatchEmbed
 from model.easr import RIRGroup, MeanShift, Upsampler, default_conv
 from model.ddpm.gaussian_diffusion import get_named_beta_schedule
+
+
+def extract(v, t, x_shape):
+    """
+    Extract some coefficients at specified timesteps, then reshape to
+    [batch_size, 1, 1, 1, 1, ...] for broadcasting purposes.
+    """
+    device = t.device
+    out = torch.gather(v, index=t, dim=0).float().to(device)
+    return out.view([t.shape[0]] + [1] * (len(x_shape) - 1))
 
 
 def _extract_into_tensor(arr, timesteps, broadcast_shape):
@@ -77,6 +88,31 @@ class SpatialAttention(nn.Module):
         attention = self.conv(pool)
         attention = self.sigmoid(attention)
         return x * attention
+
+
+class UpsampleModule(nn.Module):
+    """
+        init upsamle module, use convelution transpose and channel attention     
+    """
+    def __init__(self, conf):
+        super().__init__()
+        self.upsample = nn.ConvTranspose2d(conf.in_channels, conf.out_channels, kernel_size=4, stride=conf.upscale_factor, padding=0, output_padding=0)
+        self.attn = conf.attn
+        self.bn = nn.BatchNorm2d(conf.out_channels)  
+        self.relu = nn.ReLU(inplace=True)
+        if self.attn == 'ch_att':
+            self.attention = ChannelAttention(conf.out_channels)
+        if self.attn == 'sp_att':
+            self.attention = SpatialAttention()
+        else:
+            self.attention = nn.Identity()
+
+    def forward(self, x):
+        x = self.upsample(x)
+        # x = self.bn(x)
+        # x = self.relu(x)
+        # x = self.attention(x)
+        return x
     
 
 class UpsampleModulev2(nn.Module):
@@ -209,6 +245,90 @@ class Decoder(nn.Module):
         return x
 
 
+class GaussianDiffusionTrainer(nn.Module):
+    def __init__(self, model, alphas, betas, T):
+        super().__init__()
+
+        self.model = model
+        self.T = T
+        self.betas = torch.from_numpy(betas)
+        self.alphas = alphas
+        self.betas = torch.from_numpy(betas)
+        alphas_bar = torch.cumprod(alphas, dim=0)
+        alphas_bar = torch.cumprod(alphas, dim=0)
+
+        # calculations for diffusion q(x_t | x_{t-1}) and others
+        self.register_buffer(
+            'sqrt_alphas_bar', torch.sqrt(alphas_bar))
+        self.register_buffer(
+            'sqrt_one_minus_alphas_bar', torch.sqrt(1. - alphas_bar))
+
+    def forward(self, x_0):
+        """
+        Algorithm 1.
+        """
+        t = torch.randint(self.T, size=(x_0.shape[0], ), device=x_0.device)
+        noise = torch.randn_like(x_0)
+        x_t = (
+            extract(self.sqrt_alphas_bar, t, x_0.shape) * x_0 +
+            extract(self.sqrt_one_minus_alphas_bar, t, x_0.shape) * noise)
+        loss = F.mse_loss(self.model(x_t, t), noise, reduction='none')
+        return loss
+
+
+class GaussianDiffusionSampler(nn.Module):
+    def __init__(self, model, alphas, betas, T):
+        super().__init__()
+
+        self.model = model
+        self.T = T
+        self.betas = torch.from_numpy(betas)
+        alphas_bar = torch.cumprod(alphas, dim=0)
+        alphas_bar_prev = F.pad(alphas_bar, [1, 0], value=1)[:T]
+
+        self.register_buffer('coeff1', torch.sqrt(1. / alphas))
+        self.register_buffer('coeff2', self.coeff1 * (1. - alphas) / torch.sqrt(1. - alphas_bar))
+
+        self.register_buffer('posterior_var', self.betas * (1. - alphas_bar_prev) / (1. - alphas_bar))
+
+    def predict_xt_prev_mean_from_eps(self, x_t, t, eps):
+        assert x_t.shape == eps.shape
+        return (
+            extract(self.coeff1, t, x_t.shape) * x_t -
+            extract(self.coeff2, t, x_t.shape) * eps
+        )
+
+    def p_mean_variance(self, x_t, t):
+        # below: only log_variance is used in the KL computations
+        self.betas = self.betas.to(self.posterior_var.device)
+        var = torch.cat([self.posterior_var[1:2], self.betas[1:]])
+        var = extract(var, t, x_t.shape)
+
+        eps = self.model(x_t, t)
+        xt_prev_mean = self.predict_xt_prev_mean_from_eps(x_t, t, eps=eps)
+
+        return xt_prev_mean, var
+
+    @torch.no_grad()
+    def forward(self, x_T):
+        """
+        Algorithm 2.
+        """
+        x_t = x_T
+        for time_step in reversed(range(self.T)):
+            # print(time_step)
+            t = x_t.new_ones([x_T.shape[0], ], dtype=torch.long) * time_step
+            mean, var= self.p_mean_variance(x_t=x_t, t=t)
+            # no noise when t == 0
+            if time_step > 0:
+                noise = torch.randn_like(x_t)
+            else:
+                noise = 0
+            x_t = mean + torch.sqrt(var) * noise
+            assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
+        x_0 = x_t
+        return torch.clip(x_0, -1, 1)   
+
 
 class VitUpscalev2(nn.Module):
     """
@@ -217,13 +337,6 @@ class VitUpscalev2(nn.Module):
     def __init__(self, model_config):
         super().__init__()
         self.configs = model_config
-        # 初始化time_embedding
-        # 初始化模型
-        self.vit = torchvision.models.vit_b_16(pretrained=True)
-        self.ddpm = DdpmModel()
-        self.proj = nn.Linear(1000, 3*model_config.img_size * model_config.img_size)
-        self.decoder = Decoder(model_config.decoder)
-
         # noise and ddpm caculation schedule
         self.T = model_config.ddpm.T
         self.beta_schedule = model_config.ddpm.beta_schedule
@@ -234,6 +347,18 @@ class VitUpscalev2(nn.Module):
         self.alphas_cumprod_prev = np.append(1.0, self.alphas_cumprod[:-1])
         self.alphas_cumprod_next = np.append(self.alphas_cumprod[1:], 0.0)
         assert self.alphas_cumprod_prev.shape == (self.T,)
+
+        # 初始化time_embedding
+        # 初始化模型
+        self.vit = torchvision.models.vit_b_16(weights=ViT_B_16_Weights.IMAGENET1K_V1)
+        self.unet = DdpmModel()
+        self.ddpm = GaussianDiffusionTrainer(model=self.unet, alphas=self.alphas, betas=self.betas, T=model_config.ddpm.T)
+        self.sampler = GaussianDiffusionSampler(model=self.unet, alphas=self.alphas, betas=self.betas, T=model_config.ddpm.T)
+        self.upsample = UpsampleModule(model_config.upsample)
+        self.proj = nn.Linear(1000, 3*model_config.img_size * model_config.img_size)
+        self.decoder = Decoder(model_config.decoder)
+        self.conv_trans = nn.ConvTranspose2d(model_config.upsample.in_channels, model_config.upsample.out_channels, kernel_size=4, stride=model_config.upsample.upscale_factor, padding=0, output_padding=0)
+        # self.bn = nn.BatchNorm2d(model_config.upsample.out_channels)  
 
         # calculations for diffusion q(x_t | x_{t-1}) and others
         self.sqrt_alphas_cumprod = np.sqrt(self.alphas_cumprod)
@@ -266,18 +391,28 @@ class VitUpscalev2(nn.Module):
     def forward(self, x):
         conf = self.configs
         # noise scheduel
-        t = torch.randint(self.T, size=(x.shape[0], ), device=x.device)
-        x = F.interpolate(x, size=conf.crop_size, mode='bicubic', align_corners=False)
+        # t = torch.randint(self.T, size=(x.shape[0], ), device=x.device)
+        x = self.upsample(x)
+        # x_up = F.interpolate(x, size=conf.img_size, mode='bicubic', align_corners=False)
+        # x_up = self.bn(x_up)
+        # save feature
+        # feature_map_img = ToPILImage()(x[0].detach().cpu().squeeze())  
+        # feature_map_img.save('feature_map.png')  
+
         x = self.vit(x)
         x = self.proj(x)
         bs = x.size(0)
         x = x.view(bs, conf.ch, conf.img_size, conf.img_size)
-        noise = torch.randn_like(x)
+        # noise = torch.randn_like(x)
         # ddpm
-        xt = self.q_sample(x, t, noise)
-        x = self.ddpm(xt, t)
+        # xt = self.q_sample(x, t, noise)
+        ddpm_loss = self.ddpm(x).sum() / 1000.
+        x = self.sampler(x)
+        # x_res = x_up - x
+        # x += x_res
         x = self.decoder(x)
-        return x
+        #x = self.conv_trans(x)
+        return x, ddpm_loss
 
 def train_lr_transform(crop_size, upscale_factor, images):
     transform = Compose([

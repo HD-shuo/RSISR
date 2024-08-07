@@ -25,7 +25,7 @@ from model import MInterface
 
 def load_callbacks(conf):
     callbacks = []
-    ckpt_path = '/share/program/dxs/RSISR/checkpoint/vit_ckpt/v5/version_3'
+    ckpt_path = '/share/program/dxs/RSISR/checkpoint/vit_ckpt/v6/version_2'
     v_num = conf.model.load_v_num
     if v_num > -1:
         ckpt_path = str(Path(ckpt_path, f'version_{v_num}'))
@@ -54,6 +54,7 @@ def load_callbacks(conf):
 def main():
     # configdir = "/share/program/dxs/RSISR/configs/cons.yaml"
     configdir = "/share/program/dxs/RSISR/configs/vit-conf.yaml"
+    # configdir = "/share/program/dxs/RSISR/configs/ddpm.yaml"
     conf = OmegaConf.load(configdir)
     seed = conf.other_params.seed
     pl.seed_everything(seed)

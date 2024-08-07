@@ -3,6 +3,7 @@ from typing import Optional, Tuple, Union, List
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from labml_helpers.module import Module
 from omegaconf import OmegaConf
@@ -10,6 +11,7 @@ from PIL import Image
 import numpy as np
 
 from model.encoder import Encoder
+
 
 
 class Swish(Module):

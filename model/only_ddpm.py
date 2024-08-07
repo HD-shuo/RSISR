@@ -1,18 +1,22 @@
 from typing import Optional, Tuple, Union, List
 from omegaconf import DictConfig, OmegaConf
+from timm.models.layers import to_2tuple
 from PIL import Image
 import numpy as np
 import cv2
+import math
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 from torchvision.transforms import Compose,ToTensor, ToPILImage, Resize
+from torchvision.transforms.functional import InterpolationMode
+from torchvision.models import ViT_B_16_Weights
 
-from model.encoder import Encoder
 from model.ddpm_model import DdpmModel
-from model.decoder import Decoder
-from model.ddpm.gaussian_diffusion import GaussianDiffusion
+from model.swin_transformer_v2 import BasicLayer, PatchEmbed
+from model.easr import RIRGroup, MeanShift, Upsampler, default_conv
 from model.ddpm.gaussian_diffusion import get_named_beta_schedule
 
 
@@ -24,6 +28,7 @@ def extract(v, t, x_shape):
     device = t.device
     out = torch.gather(v, index=t, dim=0).float().to(device)
     return out.view([t.shape[0]] + [1] * (len(x_shape) - 1))
+
 
 def _extract_into_tensor(arr, timesteps, broadcast_shape):
     """
@@ -42,6 +47,7 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
     while len(res.shape) < len(broadcast_shape):
         res = res[..., None]
     return res.expand(broadcast_shape)
+
 
 class ChannelAttention(nn.Module):
     """
@@ -103,42 +109,140 @@ class UpsampleModule(nn.Module):
 
     def forward(self, x):
         x = self.upsample(x)
-        x = self.bn(x)
-        x = self.relu(x)
-        x = self.attention(x)
+        # x = self.bn(x)
+        # x = self.relu(x)
+        # x = self.attention(x)
+        return x
+    
+
+class UpsampleModulev2(nn.Module):
+    """
+        init upsamle module, use convelution transpose and channel attention     
+    """
+    def __init__(self, scale, n_color, bn=False, act=False, bias=True):
+        super(Upsampler, self).__init__()
+        m = []
+        if (scale & (scale - 1)) == 0:    # Is scale = 2^n?
+            for _ in range(int(math.log(scale, 2))):
+                m.append(default_conv(n_color, 4 * n_color, 3, bias))
+                m.append(nn.PixelShuffle(2))
+                if bn:
+                    m.append(nn.BatchNorm2d(n_color))
+                if act == 'relu':
+                    m.append(nn.ReLU(True))
+                elif act == 'prelu':
+                    m.append(nn.PReLU(n_color))
+
+        elif scale == 3:
+            m.append(default_conv(n_color, 9 * n_color, 3, bias))
+            m.append(nn.PixelShuffle(3))
+            if bn:
+                m.append(nn.BatchNorm2d(n_color))
+            if act == 'relu':
+                m.append(nn.ReLU(True))
+            elif act == 'prelu':
+                m.append(nn.PReLU(n_color))
+        else:
+            raise NotImplementedError
+        self.body = nn.Sequential(*m)
+
+    def forward(self, x):
+        return self.body(x)
+
+
+class STB_layer(nn.Module):
+    def __init__(self, img_size=256, patch_size=4, in_chans=3,
+                 embed_dim=64, depths=[2, 2, 6, 2], num_heads=[2, 4, 8, 16],
+                 window_size=8, mlp_ratio=4., qkv_bias=True,
+                 drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
+                 norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
+                 use_checkpoint=False, pretrained_window_sizes=[0, 0, 0, 0], **kwargs):
+        super().__init__()
+        self.num_layers = len(depths)
+        self.embed_dim = embed_dim
+        self.patch_norm = patch_norm
+        # split image into non-overlapping patches
+        self.patch_embed = PatchEmbed(
+            img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim,
+            norm_layer=norm_layer if self.patch_norm else None)
+        # build layers
+        self.layers = nn.ModuleList()
+        for i_layer in range(self.num_layers):
+            layer = BasicLayer(dim=embed_dim,
+                               input_resolution=(img_size,img_size),
+                               depth=depths[i_layer],
+                               num_heads=num_heads[i_layer],
+                               window_size=window_size)
+            self.layers.append(layer)
+        self.norm = norm_layer(embed_dim)
+    
+    def forward(self, x):
+        x = self.patch_embed(x)
+        for layer in self.layers:
+            x = layer(x)
+        x = self.norm(x)
         return x
 
 
-class GaussianDiffusionTrainer(nn.Module):
-    def __init__(self, model, alphas, betas, T):
+class Decoder(nn.Module):
+    """
+        init img restore decoder    
+    """
+    def __init__(self, conf):
         super().__init__()
+        self.config = conf
+        self.n_group = conf.n_group
+        self.img_size = to_2tuple(conf.img_size)
+        
+        # define head module
+        modules_IFE =[default_conv(conf.hidden_dim, conf.n_feats, kernel_size=3)]
+        modules_head = [
+            default_conv(conf.n_feats, conf.n_feats, kernel_size=3)]
 
-        self.model = model
-        self.T = T
-        self.betas = torch.from_numpy(betas)
-        self.alphas = alphas
-        self.betas = torch.from_numpy(betas)
-        alphas_bar = torch.cumprod(alphas, dim=0)
-        alphas_bar = torch.cumprod(alphas, dim=0)
-
-        # calculations for diffusion q(x_t | x_{t-1}) and others
-        self.register_buffer(
-            'sqrt_alphas_bar', torch.sqrt(alphas_bar))
-        self.register_buffer(
-            'sqrt_one_minus_alphas_bar', torch.sqrt(1. - alphas_bar))
-
-    def forward(self, x_0):
-        """
-        Algorithm 1.
-        """
-        t = torch.randint(self.T, size=(x_0.shape[0], ), device=x_0.device)
-        noise = torch.randn_like(x_0)
-        x_t = (
-            extract(self.sqrt_alphas_bar, t, x_0.shape) * x_0 +
-            extract(self.sqrt_one_minus_alphas_bar, t, x_0.shape) * noise)
-        loss = F.mse_loss(self.model(x_t, t), noise, reduction='none')
-        return loss
-
+        # build attn block
+        self.attn_blocks = nn.ModuleList([
+            RIRGroup(conf.n_feats, kernel_size=3, n_resblocks=conf.n_resblocks)
+            for _ in range(conf.n_resgroups)
+        ])
+        
+        # build stb layer
+        self.stb_layer = STB_layer(
+            img_size=conf.img_size,
+            in_chans=conf.n_feats,
+            embed_dim = conf.stb.embed_dim,
+            depths=conf.stb.depths,
+            num_heads=conf.stb.num_heads,
+            window_size=conf.stb.window_size
+        )
+        
+        # build decoder tail
+        # modules_tail = [
+        #     Upsampler(conf.upsacle_factor, conf.n_feats, act=False),
+        #     default_conv(conf.n_feats, conf.n_colors, kernel_size=3)
+        # ]
+        modules_tail = [
+            default_conv(conf.n_feats, conf.n_colors, kernel_size=3)
+        ]
+        
+        self.add_mean = MeanShift(conf.rgb_range, sign=1)
+        self.IFE = nn.Sequential(*modules_IFE)
+        self.head = nn.Sequential(*modules_head)
+        self.tail = nn.Sequential(*modules_tail)
+    
+    def forward(self, x):
+        IFE_x = self.IFE(x)
+        x = self.head(IFE_x)
+        for _ in range(self.n_group):
+            x = self.stb_layer(x)
+            B, _, C = x.shape
+            H, W = self.img_size
+            x = x.view(B, C, H, W)
+            for anblk in self.attn_blocks:
+                x = anblk(x)
+        x += IFE_x
+        x = self.tail(x)
+        x = self.add_mean(x)
+        return x
 
 class GaussianDiffusionSampler(nn.Module):
     def __init__(self, model, alphas, betas, T):
@@ -191,35 +295,34 @@ class GaussianDiffusionSampler(nn.Module):
             x_t = mean + torch.sqrt(var) * noise
             assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
         x_0 = x_t
-        return torch.clip(x_0, -1, 1)
-    
+        return torch.clip(x_0, -1, 1)   
 
-class UpscaleModel(nn.Module):
+
+class OnlyDdpm(nn.Module):
     """
         init upscale model     
     """
     def __init__(self, model_config):
         super().__init__()
         self.configs = model_config
-        # 初始化time_embedding
         # noise and ddpm caculation schedule
         self.T = model_config.ddpm.T
         self.beta_schedule = model_config.ddpm.beta_schedule
         self.betas = get_named_beta_schedule(self.beta_schedule, self.T)
-        self.alphas = torch.from_numpy(1. - self.betas)
-        # 初始化模型
-        self.encoder = Encoder(model_config.encoder)
-        self.unet = DdpmModel()
-        self.ddpm = GaussianDiffusionTrainer(model=self.unet, alphas=self.alphas, betas=self.betas, T=model_config.ddpm.T)
-        self.sampler = GaussianDiffusionSampler(model=self.unet, alphas=self.alphas, betas=self.betas, T=model_config.ddpm.T)
-        self.decoder = Decoder(model_config.decoder)
-        self.upsample = UpsampleModule(model_config.upsample)
 
-        
+        self.alphas = torch.from_numpy(1. - self.betas)
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
         self.alphas_cumprod_prev = np.append(1.0, self.alphas_cumprod[:-1])
         self.alphas_cumprod_next = np.append(self.alphas_cumprod[1:], 0.0)
         assert self.alphas_cumprod_prev.shape == (self.T,)
+
+        # 初始化time_embedding
+        # 初始化模型
+        self.ddpm = DdpmModel()
+        self.sampler = GaussianDiffusionSampler(model=self.ddpm, alphas=self.alphas, betas=self.betas, T=model_config.ddpm.T)
+        self.upsample = UpsampleModule(model_config.upsample)
+        self.conv_trans = nn.ConvTranspose2d(model_config.upsample.in_channels, model_config.upsample.out_channels, kernel_size=4, stride=model_config.upsample.upscale_factor, padding=0, output_padding=0)
+        # self.bn = nn.BatchNorm2d(model_config.upsample.out_channels)  
 
         # calculations for diffusion q(x_t | x_{t-1}) and others
         self.sqrt_alphas_cumprod = np.sqrt(self.alphas_cumprod)
@@ -251,40 +354,37 @@ class UpscaleModel(nn.Module):
 
     def forward(self, x):
         conf = self.configs
+        # noise scheduel
+        t = torch.randint(self.T, size=(x.shape[0], ), device=x.device)
         x = self.upsample(x)
-        x = self.encoder(x)
-        posterior = x.latent_dist
-        z = posterior.mode()
-        # noise = torch.randn_like(z)
+        noise = torch.randn_like(x)
         # ddpm
-        # xt = self.q_sample(z, t, noise)
-        ddpm_loss = self.ddpm(z).sum() / 1000.
-        x = self.sampler(z)
-        x = self.decoder(x)
-        return x, ddpm_loss
+        xt = self.q_sample(x, t, noise)
+        rx = self.ddpm(xt, t)
+        x = self.sampler(rx)
+        return x
 
 def train_lr_transform(crop_size, upscale_factor, images):
     transform = Compose([
         ToPILImage(),
-        Resize(crop_size // upscale_factor, interpolation=Image.BICUBIC),
+        Resize(crop_size // upscale_factor, interpolation=InterpolationMode.BICUBIC),
         ToTensor()
     ])
     for i in range(len(images)):
-        img = cv2.resize(images[i], (256, 256))
+        img = cv2.resize(images[i], (crop_size, crop_size))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = transform(img)
-        images[i] = torch.tensor(img)
+        images[i] = img.clone().detach() 
     images = torch.stack(images)
     return images
 
 
 if __name__ == "__main__":
     # load conf
-    confdir = "/share/program/dxs/RSISR/configs/model.yaml"
+    confdir = "/share/program/dxs/RSISR/configs/model_2.yaml"
     conf = OmegaConf.load(confdir)
     # load model
-    encoder = Encoder(conf.encoder)
-    upscale_model = UpscaleModel(conf)
+    upscale_model = VitUpscale(conf)
     # test
     # time embedding
     t = torch.randint(1000, (2, ))
@@ -294,11 +394,9 @@ if __name__ == "__main__":
     test_img1 = Image.open(test_img1).convert("RGB")
     test_img1 = np.array(test_img1)
     test_images.append(test_img1)
-    test_images.append(test_img1)
     test_img2 = Image.open(test_img2).convert("RGB")
     test_img2 = np.array(test_img2)
     test_images.append(test_img2)
-    test_images.append(test_img2)
-    test_tensors = train_lr_transform(256, 4, test_images)
+    test_tensors = train_lr_transform(224, 4, test_images)
     output_features = upscale_model(test_tensors)
     print(output_features.shape)

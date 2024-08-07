@@ -43,7 +43,7 @@ def train_lr_transform(crop_size, upscale_factor):
         ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-    print("After resizing: size =", crop_size // upscale_factor)
+    # print("After resizing: size =", crop_size // upscale_factor)
     return transformed
 
 
