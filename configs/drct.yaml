@@ -5,8 +5,8 @@ data:
   val_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
   test_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
   original_size: 256
-  crop_size: 224
-  upscale_factor: 4
+  crop_size: 256
+  upscale_factor: 2
   batch_size: 4
   wrap: bool
   # 按类推理相关参数，含数据扩增
@@ -15,11 +15,11 @@ data:
   augment: False
   inference_mode: False
 model:
- model_name: vit_upscalev2
+ model_name: drct_model
  color_range: 1
- lr: 1.0e-4
+ lr: 2.0e-4
  loss: mse
- weight_decay: 1.0e-5
+ weight_decay: 0
  lr_scheduler: 'step'
  lr_decay_steps: 10
  lr_decay_rate: 0.5
@@ -33,32 +33,9 @@ model:
  model_config:
   img_size: 256
   ch: 3
-  upsample:
-   in_channels: 3
-   out_channels: 3
-   attn: 'ch_att'
-   upscale_factor: 4
   ddpm: 
    T: 1000
    beta_schedule: "linear"
-  decoder:
-   img_size: 256
-   n_colors: 3
-   patch_size: 1
-   n_group: 1
-   hidden_dim: 3
-   n_feats: 16
-   n_resblocks: 4
-   n_resgroups: 2
-   n_stb: 1
-   stb:
-    embed_dim: 16
-    input_resolution: 256
-    num_heads: [2,4,8,16]
-    window_size: 4
-    depths: [2,2,2,2]
-   upsacle_factor: 4
-   rgb_range: 1
 trainer:
  max_epochs: 100
  devices: 8
@@ -68,9 +45,9 @@ trainer:
 callbacks:
  lr_scheduler: step
  ckpt_flag: 'v0'
- model_n: 'vit'
+ model_n: 'drct'
 other_params:
  trainer_stage: 'train'
  seed: 23
  log_flag: 'v1'
- model_n: 'vit_v6'
+ model_n: 'drct'

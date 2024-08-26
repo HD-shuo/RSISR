@@ -25,16 +25,18 @@ from model import MInterface
 
 def load_callbacks(conf):
     callbacks = []
-    ckpt_path = '/share/program/dxs/RSISR/checkpoint/vit_ckpt/v6/version_2'
+    model_n = conf.callbacks.model_n
+    ckpt_flag = conf.callbacks.ckpt_flag
+    ckpt_path = f'/share/program/dxs/RSISR/checkpoint/{model_n}/{ckpt_flag}'
     v_num = conf.model.load_v_num
     if v_num > -1:
         ckpt_path = str(Path(ckpt_path, f'version_{v_num}'))
-    # callbacks.append(plc.EarlyStopping(
-    #     monitor='mpsnr',
-    #     mode='max',
-    #     patience=10,
-    #     min_delta=0.001
-    # ))
+    callbacks.append(plc.EarlyStopping(
+        monitor='mpsnr',
+        mode='max',
+        patience=10,
+        min_delta=0.001
+    ))
 
     callbacks.append(plc.ModelCheckpoint(
         monitor='mpsnr',
@@ -52,9 +54,11 @@ def load_callbacks(conf):
 
 
 def main():
+    # configdir = "/share/program/dxs/RSISR/configs/encoder_decoder.yaml"
     # configdir = "/share/program/dxs/RSISR/configs/cons.yaml"
-    configdir = "/share/program/dxs/RSISR/configs/vit-conf.yaml"
+    # configdir = "/share/program/dxs/RSISR/configs/vit-conf.yaml"
     # configdir = "/share/program/dxs/RSISR/configs/ddpm.yaml"
+    configdir = "/share/program/dxs/RSISR/configs/drct.yaml"
     conf = OmegaConf.load(configdir)
     seed = conf.other_params.seed
     pl.seed_everything(seed)
