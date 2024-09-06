@@ -1,9 +1,9 @@
 data:
  target: data.data_interface.DInterface
  params:
-  train_dataset_dir: /share/program/dxs/Database/data/pngimage_train_HR
-  val_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
-  test_dataset_dir: /share/program/dxs/Database/data/pngimage2_valid_HR
+  train_dataset_dir: /share/program/dxs/Database/data/DIV2K_train_HR
+  val_dataset_dir: /share/program/dxs/Database/data/DIV2K_valid_HR
+  test_dataset_dir: /share/program/dxs/Database/data/DIV2K_test_HR
   original_size: 256
   crop_size: 256
   upscale_factor: 2
@@ -25,7 +25,7 @@ model:
  lr_decay_rate: 0.5
  lr_T_max: 10
  min_lr: 2.0e-5
- checkpoint_loaddir: /share/program/dxs/RSISR/checkpoint/drct/v1
+ checkpoint_loaddir: None
  checkpoint_version: 0
  load_v_num: 0
  best: True
@@ -45,10 +45,10 @@ trainer:
  strategy: 'ddp_find_unused_parameters_true'
 callbacks:
  lr_scheduler: step
- ckpt_flag: 'v2'
+ ckpt_flag: 'v1'
  model_n: 'drct'
 other_params:
  trainer_stage: 'train'
  seed: 23
- log_flag: 'v2'
+ log_flag: 'v1'
  model_n: 'drct'

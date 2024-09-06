@@ -1,7 +1,14 @@
 import math
+import cv2
+from PIL import Image
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
+from torchvision.transforms import Compose,ToTensor, ToPILImage, Resize
+import torch.nn.functional as F
+from torchvision.transforms.functional import InterpolationMode
+import segmentation_models_pytorch as smp
 import numpy as np
 
 from basicsr.utils.registry import ARCH_REGISTRY
@@ -748,6 +755,9 @@ class DrctModel(nn.Module):
         #     self.layers.append(layer)
         self.norm = norm_layer(self.num_features)
 
+        # FPN before ddpm
+        self.fpn_3 = smp.FPN('resnet34', encoder_weights='imagenet', encoder_depth=3, in_channels=3, classes=3)
+        self.fpn_5 = smp.FPN('resnet34', encoder_weights='imagenet', encoder_depth=5, in_channels=3, classes=3)
         # noise and ddpm caculation schedule
         self.T = model_config.ddpm.T
         self.beta_schedule = model_config.ddpm.beta_schedule
@@ -820,6 +830,8 @@ class DrctModel(nn.Module):
     def forward(self, x):
         self.mean = self.mean.type_as(x)
         x = (x - self.mean) * self.img_range
+        x_fpn_3 = self.fpn_3(x)
+        x_fpn_5 = self.fpn_5(x)
 
         if self.upsampler == 'pixelshuffle':
             # for classical SR
@@ -836,3 +848,43 @@ class DrctModel(nn.Module):
         x = x / self.img_range + self.mean
 
         return x, ddpm_loss
+
+def train_lr_transform(crop_size, upscale_factor, images):
+    transform = Compose([
+        ToPILImage(),
+        Resize(crop_size // upscale_factor, interpolation=InterpolationMode.BICUBIC),
+        ToTensor()
+    ])
+    for i in range(len(images)):
+        img = cv2.resize(images[i], (crop_size, crop_size))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = transform(img)
+        factor = 32
+        h, w = img.shape[1], img.shape[2]
+        H, W = ((h + factor) // factor) * factor, ((w + factor) // factor) * factor
+        padh = H - h if h % factor != 0 else 0
+        padw = W - w if w % factor != 0 else 0
+        img = F.pad(img.unsqueeze(0), (0,padw,0,padh), 'reflect').squeeze(0)
+        images[i] = img.clone().detach() 
+    images = torch.stack(images)
+    print(images.size())
+    return images
+
+if __name__ == "__main__":
+    # load model
+    model = smp.FPN('resnet34', encoder_weights='imagenet', encoder_depth=3, in_channels=3, classes=3)
+    # test
+    test_images = []
+    test_img1 = '/share/program/dxs/RSISR/test_demo/airplane08.png'
+    test_img2 = '/share/program/dxs/RSISR/test_demo/freeway26.png'
+    test_img1 = Image.open(test_img1).convert("RGB")
+    test_img1 = np.array(test_img1)
+    test_images.append(test_img1)
+    test_img2 = Image.open(test_img2).convert("RGB")
+    test_img2 = np.array(test_img2)
+    test_images.append(test_img2)
+    test_tensors = train_lr_transform(224, 4, test_images)
+    output_features = model(test_tensors)
+    print(output_features.shape)
+    feature_map_img = ToPILImage()(output_features[1].detach().cpu().squeeze())  
+    feature_map_img.save('fpn_map.png')  

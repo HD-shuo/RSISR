@@ -314,20 +314,30 @@ class GaussianDiffusionSampler(nn.Module):
         """
         Algorithm 2.
         """
+        # 确定性去噪过程
         x_t = x_T
         for time_step in reversed(range(self.T)):
-            # print(time_step)
             t = x_t.new_ones([x_T.shape[0], ], dtype=torch.long) * time_step
-            mean, var= self.p_mean_variance(x_t=x_t, t=t)
-            # no noise when t == 0
-            if time_step > 0:
-                noise = torch.randn_like(x_t)
-            else:
-                noise = 0
-            x_t = mean + torch.sqrt(var) * noise
-            assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
+            mean, _ = self.p_mean_variance(x_t=x_t, t=t)
+            # Remove stochastic sampling; use mean directly for deterministic denoising
+            x_t = mean
+            # No need to check for NaNs as we're not introducing any randomness
         x_0 = x_t
-        return torch.clip(x_0, -1, 1)   
+        return torch.clamp(x_0, -1, 1)
+        # x_t = x_T
+        # for time_step in reversed(range(self.T)):
+        #     # print(time_step)
+        #     t = x_t.new_ones([x_T.shape[0], ], dtype=torch.long) * time_step
+        #     mean, var= self.p_mean_variance(x_t=x_t, t=t)
+        #     # no noise when t == 0
+        #     if time_step > 0:
+        #         noise = torch.randn_like(x_t)
+        #     else:
+        #         noise = 0
+        #     x_t = mean + torch.sqrt(var + 1e-6) * noise
+        #     assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
+        # x_0 = x_t
+        # return torch.clip(x_0, -1, 1)   
 
 
 class VitUpscalev2(nn.Module):
