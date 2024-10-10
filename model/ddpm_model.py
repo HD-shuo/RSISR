@@ -295,7 +295,8 @@ class DdpmModel(Module):
     ## U-Net
     """
 
-    def __init__(self, image_channels: int = 3, n_channels: int = 64,
+    def __init__(self, image_channels: int = 3, n_channels: int = 192,
+                 is_feature: bool = True,
                  ch_mults: Union[Tuple[int, ...], List[int]] = (1, 2, 2, 4),
                  is_attn: Union[Tuple[bool, ...], List[int]] = (False, False, True, True),
                  n_blocks: int = 2):
@@ -307,6 +308,9 @@ class DdpmModel(Module):
         * `n_blocks` is the number of `UpDownBlocks` at each resolution
         """
         super().__init__()
+
+        # input is feature or not
+        self.is_feature = is_feature
 
         # Number of resolutions
         n_resolutions = len(ch_mults)
@@ -364,8 +368,9 @@ class DdpmModel(Module):
         self.norm = nn.GroupNorm(8, n_channels)
         self.act = Swish()
         self.final = nn.Conv2d(in_channels, image_channels, kernel_size=(3, 3), padding=(1, 1))
+        self.feature_final = nn.Conv2d(in_channels, in_channels//2, kernel_size=(3, 3), padding=(1, 1))
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor):
+    def forward(self, x: torch.Tensor, x_c:list[torch.Tensor], t: torch.Tensor):
         """
         * `x` has shape `[batch_size, in_channels, height, width]`
         * `t` has shape `[batch_size]`
@@ -374,15 +379,24 @@ class DdpmModel(Module):
         # Get time-step embeddings
         t = self.time_emb(t)
 
-        # Get image projection
-        x = self.image_proj(x)
+        # check feature img or normal img
+        if x.shape[1] == 3:
+            self.is_feature = False
+        else:
+            self.is_feature = True
+
+        if not self.is_feature:
+            # Get image projection
+            x = self.image_proj(x)
 
         # `h` will store outputs at each resolution for skip connection
         h = [x]
         # First half of U-Net
-        for m in self.down:
+        for ind, m in enumerate(self.down):
             x = m(x, t)
-            h.append(x)
+            res_x = torch.cat((x, x_c[ind]), dim=1)
+            # h.append(x)
+            h.append(res_x)
 
         # Middle (bottom)
         x = self.middle(x, t)
@@ -397,9 +411,11 @@ class DdpmModel(Module):
                 x = torch.cat((x, s), dim=1)
                 #
                 x = m(x, t)
-
         # Final normalization and convolution
-        return self.final(self.act(self.norm(x)))
+        if self.is_feature:
+            return self.feature_final(self.act(self.norm(x)))
+        else:
+            return self.final(self.act(self.norm(x)))
 
 if __name__ == "__main__":
     confdir = "/home/work/daixingshuo/RSISR/configs/model.yaml"

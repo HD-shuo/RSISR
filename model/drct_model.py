@@ -664,6 +664,8 @@ class DrctModel(nn.Module):
         num_in_ch = in_chans
         num_out_ch = in_chans
         num_feat = 64
+        embed_dim = model_config.drct.embed_dim
+        upscale = model_config.upscale
         self.img_range = img_range
         if in_chans == 3:
             rgb_mean = (0.4488, 0.4371, 0.4040)
@@ -716,36 +718,17 @@ class DrctModel(nn.Module):
         # build
         self.first_layers = nn.ModuleList()
         self.second_layers = nn.ModuleList()
-        for i_layer in range(int(self.num_layers/2)):
-            layer = RDG(dim=embed_dim, input_resolution=(patches_resolution[0], patches_resolution[1]),
-                                 num_heads= num_heads[i_layer], window_size=window_size, depth=0,
-                                 shift_size= window_size//2, mlp_ratio=mlp_ratio,
-                                 qkv_bias=qkv_bias, qk_scale=qk_scale,  drop=drop_rate, attn_drop=attn_drop_rate,
-                                 drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])], 
-                                             norm_layer=norm_layer,gc=gc, img_size=img_size, patch_size=patch_size)
-
-            self.first_layers.append(layer)
-        
-        for i_layer in range(int(self.num_layers/2)):
-            layer = RDG(dim=embed_dim, input_resolution=(patches_resolution[0], patches_resolution[1]),
-                                 num_heads= num_heads[i_layer], window_size=window_size, depth=0,
-                                 shift_size= window_size//2, mlp_ratio=mlp_ratio,
-                                 qkv_bias=qkv_bias, qk_scale=qk_scale,  drop=drop_rate, attn_drop=attn_drop_rate,
-                                 drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])], 
-                                             norm_layer=norm_layer,gc=gc, img_size=img_size, patch_size=patch_size)
-
-            self.second_layers.append(layer)
-        # self.layers = nn.ModuleList()
-        # for i_layer in range(self.num_layers):
+        self.layers = nn.ModuleList()
+        for i_layer in range(self.num_layers):
             
-        #     layer = RDG(dim=embed_dim, input_resolution=(patches_resolution[0], patches_resolution[1]),
-        #                          num_heads= num_heads[i_layer], window_size=window_size, depth=0,
-        #                          shift_size= window_size//2, mlp_ratio=mlp_ratio,
-        #                          qkv_bias=qkv_bias, qk_scale=qk_scale,  drop=drop_rate, attn_drop=attn_drop_rate,
-        #                          drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])], 
-        #                                      norm_layer=norm_layer,gc=gc, img_size=img_size, patch_size=patch_size)
+            layer = RDG(dim=embed_dim, input_resolution=(patches_resolution[0], patches_resolution[1]),
+                                 num_heads= num_heads[i_layer], window_size=window_size, depth=0,
+                                 shift_size= window_size//2, mlp_ratio=mlp_ratio,
+                                 qkv_bias=qkv_bias, qk_scale=qk_scale,  drop=drop_rate, attn_drop=attn_drop_rate,
+                                 drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])], 
+                                             norm_layer=norm_layer,gc=gc, img_size=img_size, patch_size=patch_size)
 
-        #     self.layers.append(layer)
+            self.layers.append(layer)
         self.norm = norm_layer(self.num_features)
 
         # noise and ddpm caculation schedule
@@ -760,6 +743,7 @@ class DrctModel(nn.Module):
         assert self.alphas_cumprod_prev.shape == (self.T,)
 
         # 初始化time_embedding
+        self.ddp_conv_in = nn.Conv2d(embed_dim, num_out_ch, 3, 1, 1)
         self.unet = DdpmModel()
         self.ddpm = GaussianDiffusionTrainer(model=self.unet, alphas=self.alphas, betas=self.betas, T=model_config.ddpm.T)
         self.sampler = GaussianDiffusionSampler(model=self.unet, alphas=self.alphas, betas=self.betas, T=model_config.ddpm.T)
@@ -806,33 +790,40 @@ class DrctModel(nn.Module):
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
-
-        # for layer in self.layers:
-        #     x = layer(x, x_size)
-        for layer in self.first_layers:
+        x_c_list = list()
+        for layer in self.layers:
             x = layer(x, x_size)
-        for layer in self.second_layers:
-            x = layer(x, x_size)
+            x_c_list.append(x)
         x = self.norm(x)  # b seq_len c
         x = self.patch_unembed(x, x_size)
-        return x
+        return x, x_c_list
 
     def forward(self, x):
         self.mean = self.mean.type_as(x)
         x = (x - self.mean) * self.img_range
+        x_in = x
 
         if self.upsampler == 'pixelshuffle':
             # for classical SR
-            ddpm_loss = self.ddpm(x).sum() / 1000.
-            x_ddp = self.sampler(x)
-            x_ddp = self.conv_first(x_ddp)
             x = self.conv_first(x)
-            x = self.conv_after_body(self.forward_features(x)) + x_ddp
+            x, x_c_li = self.forward_features(x)
+            ddpm_losses = list()
+            re_x_c_li = list()
+            for x_c in x_c_li:
+                x_c = x_c.permute(0,2,1).reshape(x.size())
+                re_x_c_li.append(x_c)
+                # e_ddp = self.ddp_conv_in(x)
+                # x_ddp_c = self.ddp_conv_in(x_c)
+                # per_ddpm_loss = self.ddpm(x,x_c).sum() / 1000.
+                # ddpm_losses.append(per_ddpm_loss)
+            ddpm_losses = self.ddpm(x,re_x_c_li).sum() / 1000.
+            ddpm_loss = sum(ddpm_losses) / len(ddpm_losses)
+            x_ddp = self.sampler(x_in)
+            x_ddp = self.conv_first(x_ddp)
+            x = self.conv_after_body(x) + x_ddp
             x = self.conv_before_upsample(x)
             x = self.conv_last(self.upsample(x))
 
-        ddpm_loss = self.ddpm(x).sum() / 1000.
-        x = self.sampler(x)
         x = x / self.img_range + self.mean
 
         return x, ddpm_loss

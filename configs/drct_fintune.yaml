@@ -4,17 +4,17 @@ data:
   train_dataset_dir: /share/program/dxs/Database/data/DIV2K_train_HR
   val_dataset_dir: /share/program/dxs/Database/data/DIV2K_valid_HR
   test_dataset_dir: /share/program/dxs/Database/data/DIV2K_test_HR
-  original_size: 256
-  crop_size: 256
+  original_size: [256, 256]
+  crop_size: [256, 256]
   upscale_factor: 2
-  batch_size: 2
+  batch_size: 1
   wrap: bool
   # 按类推理相关参数，含数据扩增
   type_name: agricultural
   n_augmentations: 3
   augment: False
   inference_mode: False
-model:
+model: 
  model_name: drct_model
  color_range: 1
  lr: 2.0e-4
@@ -25,30 +25,30 @@ model:
  lr_decay_rate: 0.5
  lr_T_max: 10
  min_lr: 2.0e-5
- checkpoint_loaddir: None
+ checkpoint_loaddir: /share/program/dxs/RSISR/checkpoint/drct/v4
  checkpoint_version: 0
  load_v_num: 0
  best: True
  image_size: 256
  model_config:
   img_size: 256
-  upscale: 2
+  upscale: 4
   ch: 3
   ddpm: 
-   T: 1000
+   T: 100
    beta_schedule: "linear"
 trainer:
  max_epochs: 100
- devices: 8
+ devices: 4
  precision: 'bf16-mixed'
  accelerator: "gpu"
  strategy: 'ddp_find_unused_parameters_true'
 callbacks:
  lr_scheduler: step
- ckpt_flag: 'v1'
+ ckpt_flag: 'v4_fintune'
  model_n: 'drct'
 other_params:
  trainer_stage: 'train'
  seed: 23
- log_flag: 'v1'
+ log_flag: 'v4_fintune'
  model_n: 'drct'

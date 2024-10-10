@@ -49,7 +49,7 @@ class MInterface(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        lr, hr, _ = batch
+        lr, hr = batch
         input_tensor = lr.clone().detach()
         #input_tensor = torch.tensor(lr)
         # 带有ddpm_loss输出
@@ -88,9 +88,18 @@ class MInterface(pl.LightningModule):
         sr_rgb = self(input_tensor)
         #print(sr_rgb.size())
         #sr_rgb = self(lr, hr)  # 使用模型进行高分辨率重建得到 RGB 图像
-        if sr_rgb.dtype == torch.bfloat16:
-            sr_rgb = sr_rgb.float()
-        sr_rgb = quantize(sr_rgb, self.hparams.color_range)  # 对重建的图像进行量化处理（可选）
+        if isinstance(sr_rgb, tuple):
+            if sr_rgb[0].dtype == torch.bfloat16:
+                sr_rgb[0] = sr_rgb[0].float()
+                sr_rgb_img = sr_rgb[0]
+            else:
+                sr_rgb_img = sr_rgb[0]
+        else:
+            if sr_rgb.dtype == torch.bfloat16:
+                sr_rgb_img = sr_rgb.float()
+            else:
+                sr_rgb_img = sr_rgb
+        sr_rgb = quantize(sr_rgb_img, self.hparams.color_range)  # 对重建的图像进行量化处理（可选）
         mpsnr, mssim, lpips, _, _ = tensor_accessment(
             x_pred=sr_rgb.cpu().numpy(),
             x_true=hr.cpu().numpy(),

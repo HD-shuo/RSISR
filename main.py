@@ -58,6 +58,7 @@ def main():
     # configdir = "/share/program/dxs/RSISR/configs/cons.yaml"
     # configdir = "/share/program/dxs/RSISR/configs/vit-conf.yaml"
     # configdir = "/share/program/dxs/RSISR/configs/ddpm.yaml"
+    # configdir = "/share/program/dxs/RSISR/configs/drct_fintune.yaml"
     configdir = "/share/program/dxs/RSISR/configs/drct.yaml"
     conf = OmegaConf.load(configdir)
     seed = conf.other_params.seed
@@ -74,7 +75,7 @@ def main():
         model = MInterface(**conf.model)
     else:
         model = MInterface(**conf.model)
-        model.load_state_dict(torch.load(load_path), strict=False)
+        model.load_state_dict(torch.load(load_path, weights_only=False), strict=False)
         print("load the weights from:", load_path)
     # 加载预训练模型
     #pipeline = DiffusionPipeline.from_pretrained("/share/program/dxs/huggingface/stable-diffusion-xl-refiner-0.9", torch_dtype=torch.float16, use_safetensors=True, variant="fp16")
