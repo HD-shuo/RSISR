@@ -632,8 +632,8 @@ class DrctModel(nn.Module):
                  patch_size=1,
                  in_chans=3,
                  embed_dim=96,
-                 depths=(6, 6, 6, 6),
-                 num_heads=(6, 6, 6, 6),
+                 depths=(4, 4, 4, 4),
+                 num_heads=(4, 4, 4, 4),
                  window_size=16,
                  compress_ratio=3,
                  squeeze_factor=30,
@@ -657,13 +657,13 @@ class DrctModel(nn.Module):
                  **kwargs):
         super(DrctModel, self).__init__()
 
-        self.window_size = window_size
+        self.window_size = model_config.drct.window_size
         self.shift_size = window_size // 2
         self.overlap_ratio = overlap_ratio
 
         num_in_ch = in_chans
         num_out_ch = in_chans
-        num_feat = 64
+        num_feat = model_config.drct.num_feat
         embed_dim = model_config.drct.embed_dim
         upscale = model_config.upscale
         self.img_range = img_range
@@ -743,8 +743,9 @@ class DrctModel(nn.Module):
         assert self.alphas_cumprod_prev.shape == (self.T,)
 
         # 初始化time_embedding
+        self.ddpm_ch = model_config.ddpm.in_ch
         self.ddp_conv_in = nn.Conv2d(embed_dim, num_out_ch, 3, 1, 1)
-        self.unet = DdpmModel()
+        self.unet = DdpmModel(n_channels=self.ddpm_ch)
         self.ddpm = GaussianDiffusionTrainer(model=self.unet, alphas=self.alphas, betas=self.betas, T=model_config.ddpm.T)
         self.sampler = GaussianDiffusionSampler(model=self.unet, alphas=self.alphas, betas=self.betas, T=model_config.ddpm.T)
 
@@ -801,13 +802,11 @@ class DrctModel(nn.Module):
     def forward(self, x):
         self.mean = self.mean.type_as(x)
         x = (x - self.mean) * self.img_range
-        x_in = x
 
         if self.upsampler == 'pixelshuffle':
             # for classical SR
             x = self.conv_first(x)
             x, x_c_li = self.forward_features(x)
-            ddpm_losses = list()
             re_x_c_li = list()
             for x_c in x_c_li:
                 x_c = x_c.permute(0,2,1).reshape(x.size())
@@ -816,10 +815,10 @@ class DrctModel(nn.Module):
                 # x_ddp_c = self.ddp_conv_in(x_c)
                 # per_ddpm_loss = self.ddpm(x,x_c).sum() / 1000.
                 # ddpm_losses.append(per_ddpm_loss)
-            ddpm_losses = self.ddpm(x,re_x_c_li).sum() / 1000.
-            ddpm_loss = sum(ddpm_losses) / len(ddpm_losses)
-            x_ddp = self.sampler(x_in)
-            x_ddp = self.conv_first(x_ddp)
+            re_x_c_copy = re_x_c_li.copy()
+            ddpm_loss = self.ddpm(x,re_x_c_li).sum() / 1000.
+            x_ddp = self.sampler(x, re_x_c_copy)
+            # x_ddp = self.conv_first(x_ddp)
             x = self.conv_after_body(x) + x_ddp
             x = self.conv_before_upsample(x)
             x = self.conv_last(self.upsample(x))

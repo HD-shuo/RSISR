@@ -311,7 +311,7 @@ class GaussianDiffusionSampler(nn.Module):
         return xt_prev_mean, var
 
     @torch.no_grad()
-    def forward(self, x_T):
+    def forward(self, x_T, x_c):
         """
         Algorithm 2.
         """
@@ -319,7 +319,7 @@ class GaussianDiffusionSampler(nn.Module):
         x_t = x_T
         for time_step in reversed(range(self.T)):
             t = x_t.new_ones([x_T.shape[0], ], dtype=torch.long) * time_step
-            mean, _ = self.p_mean_variance(x_t=x_t, t=t)
+            mean, _ = self.p_mean_variance(x_t=x_t, x_c=x_c, t=t)
             # Remove stochastic sampling; use mean directly for deterministic denoising
             x_t = mean
             # No need to check for NaNs as we're not introducing any randomness

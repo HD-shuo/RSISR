@@ -77,7 +77,7 @@ class ResidualBlock(Module):
     """
 
     def __init__(self, in_channels: int, out_channels: int, time_channels: int,
-                 n_groups: int = 32, dropout: float = 0.1):
+                 n_groups: int = 16, dropout: float = 0.1):
         """
         * `in_channels` is the number of input channels
         * `out_channels` is the number of input channels
@@ -295,7 +295,7 @@ class DdpmModel(Module):
     ## U-Net
     """
 
-    def __init__(self, image_channels: int = 3, n_channels: int = 192,
+    def __init__(self, image_channels: int = 3, n_channels: int = 32,
                  is_feature: bool = True,
                  ch_mults: Union[Tuple[int, ...], List[int]] = (1, 2, 2, 4),
                  is_attn: Union[Tuple[bool, ...], List[int]] = (False, False, True, True),
@@ -350,11 +350,21 @@ class DdpmModel(Module):
         # For each resolution
         for i in reversed(range(n_resolutions)):
             # `n_blocks` at the same resolution
-            out_channels = in_channels
+            if i <= 1:
+                pre_in_channels = in_channels
+                in_channels = in_channels + n_channels
+                out_channels = pre_in_channels
+            else:
+                pre_in_channels = in_channels
+                out_channels = in_channels
             for _ in range(n_blocks):
                 up.append(UpBlock(in_channels, out_channels, n_channels * 4, is_attn[i]))
             # Final block to reduce the number of channels
-            out_channels = in_channels // ch_mults[i]
+            if i <= 1:
+                out_channels = pre_in_channels // ch_mults[i]
+                in_channels = pre_in_channels
+            else:
+                out_channels = pre_in_channels // ch_mults[i]
             up.append(UpBlock(in_channels, out_channels, n_channels * 4, is_attn[i]))
             in_channels = out_channels
             # Up sample at all resolutions except last
@@ -368,9 +378,9 @@ class DdpmModel(Module):
         self.norm = nn.GroupNorm(8, n_channels)
         self.act = Swish()
         self.final = nn.Conv2d(in_channels, image_channels, kernel_size=(3, 3), padding=(1, 1))
-        self.feature_final = nn.Conv2d(in_channels, in_channels//2, kernel_size=(3, 3), padding=(1, 1))
+        self.feature_final = nn.Conv2d(in_channels, in_channels, kernel_size=(3, 3), padding=(1, 1))
 
-    def forward(self, x: torch.Tensor, x_c:list[torch.Tensor], t: torch.Tensor):
+    def forward(self, x: torch.Tensor, x_c_o:List[torch.Tensor], t: torch.Tensor):
         """
         * `x` has shape `[batch_size, in_channels, height, width]`
         * `t` has shape `[batch_size]`
@@ -392,25 +402,48 @@ class DdpmModel(Module):
         # `h` will store outputs at each resolution for skip connection
         h = [x]
         # First half of U-Net
-        for ind, m in enumerate(self.down):
-            x = m(x, t)
-            res_x = torch.cat((x, x_c[ind]), dim=1)
-            # h.append(x)
-            h.append(res_x)
+        x_c = x_c_o.copy()
+        if self.is_feature:
+            for m in self.down:
+                x = m(x, t)
+                if x_c:
+                    if isinstance(m, Downsample):
+                        h.append(x)
+                    else:
+                        res = x_c.pop(0)
+                        if x.shape != res.shape:
+                            res = F.interpolate(res, size=x.shape[2:], mode='bilinear', align_corners=False)
+                        res_x = torch.cat((x, res), dim=1)
+                        h.append(res_x)
+                else:
+                    h.append(x)
+        else:
+            for m in self.down:
+                x = m(x, t)
+                h.append(x)
+        if h[4].size() == [1,128,64,64] or h[5].size() == [1,128,64,64]:
+            raise ValueError("跳层链接大小有误")
 
         # Middle (bottom)
         x = self.middle(x, t)
 
-        # Second half of U-Net
-        for m in self.up:
-            if isinstance(m, Upsample):
-                x = m(x, t)
-            else:
-                # Get the skip connection from first half of U-Net and concatenate
-                s = h.pop()
-                x = torch.cat((x, s), dim=1)
-                #
-                x = m(x, t)
+        try:
+            # Second half of U-Net
+            for m in self.up:
+                if isinstance(m, Upsample):
+                    x = m(x, t)
+                else:
+                    # Get the skip connection from first half of U-Net and concatenate
+                    s = h.pop()
+                    or_x = x
+                    x = torch.cat((x, s), dim=1)
+                    #
+                    x = m(x, t)
+        except RuntimeError as e:
+            print(e)
+            print("拼接前特征的大小为：", or_x.size())
+            print("拼接后特征的大小为：", x.size())
+            print("skip 特征大小为：", s.size())
         # Final normalization and convolution
         if self.is_feature:
             return self.feature_final(self.act(self.norm(x)))
